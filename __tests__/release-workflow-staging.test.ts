@@ -104,10 +104,50 @@ describe('release workflow: staging (pre-release) mode', () => {
     expect(yml).toMatch(/prerelease:[\s\S]{0,200}?type:\s*boolean/);
   });
 
+  it('can be triggered from a feature branch by an -rc tag', () => {
+    // workflow_dispatch is only offered for workflows on the default branch, so
+    // without a push trigger a release cannot be rehearsed before merging.
+    expect(yml).toMatch(/^\s+push:\s*$/m);
+    expect(yml).toMatch(/tags:\s*\n\s+- 'v\*-rc\*'/);
+    // Plain vX.Y.Z must NOT trigger it — a production release goes through an
+    // explicit dispatch, never an incidental tag push.
+    expect(yml).not.toMatch(/tags:\s*\n\s+- 'v\*'\s*$/m);
+  });
+
+  it('resolves staging once, failing closed', () => {
+    // The whole safety argument rests on this step: every consumer reads
+    // steps.mode.outputs.staging, so they cannot disagree, and the default is
+    // staging unless a run proves it is a production dispatch.
+    expect(yml).toMatch(/id:\s*mode/);
+    expect(yml).toMatch(/STAGING=true/);
+    // Production requires ALL THREE conjuncts. Each is pinned as the actual
+    // `[ ... ]` test, not as a bare mention of the variable — `default_branch`
+    // and `github.event_name` both also appear in this step's log line, so a
+    // substring check stays green after the real comparison is deleted
+    // (verified by mutation).
+    expect(yml).toMatch(/\[\s*"\$\{\{\s*github\.event_name\s*\}\}"\s*=\s*"workflow_dispatch"\s*\]/);
+    expect(yml).toMatch(
+      /\[\s*"\$\{\{\s*github\.ref\s*\}\}"\s*=\s*"refs\/heads\/\$\{\{\s*github\.event\.repository\.default_branch\s*\}\}"\s*\]/,
+    );
+    expect(yml).toMatch(/\[\s*"\$\{\{\s*inputs\.prerelease\s*\}\}"\s*!=\s*"true"\s*\]/);
+    expect(yml).toMatch(/STAGING=false/);
+  });
+
+  it('routes every staging decision through the resolved mode, not the raw input', () => {
+    // A consumer left reading `inputs.prerelease` would evaluate to empty on a
+    // tag push and silently take the production path.
+    const consumers = yml
+      .split('\n')
+      .filter((l) => l.includes('inputs.prerelease') && !l.trim().startsWith('#'));
+    // The only legitimate reader is the mode step itself.
+    expect(consumers.length).toBe(1);
+    expect(consumers[0]).toMatch(/!=\s*"true"/);
+  });
+
   it('skips the CHANGELOG promote on a staging run', () => {
     // Without this guard a rehearsal consumes [Unreleased] and pushes to main,
     // so the real release that follows publishes empty notes.
-    expect(yml).toMatch(/if:\s*\$\{\{\s*!inputs\.prerelease\s*\}\}/);
+    expect(yml).toMatch(/if:\s*\$\{\{\s*steps\.mode\.outputs\.staging\s*!=\s*'true'\s*\}\}/);
   });
 
   it('passes --prerelease to gh release create when staging', () => {
@@ -117,7 +157,7 @@ describe('release workflow: staging (pre-release) mode', () => {
     // the actual mechanism instead — the guarded assignment, and the fact that
     // the variable reaches the create call.
     expect(yml).toMatch(
-      /inputs\.prerelease\s*\}\}"\s*=\s*"true"\s*\][\s\S]{0,160}FLAGS="--prerelease"/,
+      /steps\.mode\.outputs\.staging\s*\}\}"\s*=\s*"true"\s*\][\s\S]{0,160}FLAGS="--prerelease"/,
     );
     expect(yml).toMatch(/gh release create[\s\S]{0,200}\$FLAGS/);
   });
@@ -125,11 +165,15 @@ describe('release workflow: staging (pre-release) mode', () => {
   it('does not push the lock-file sync to main on a staging run', () => {
     const pushes = yml.split('\n').filter((l) => l.includes('git push origin'));
     expect(pushes.length).toBeGreaterThan(0); // non-vacuity: pushes still exist
-    // Every push must sit under a prerelease guard. Cheap structural proxy:
-    // the lock-file step's push is wrapped in an `if … prerelease … else`.
     expect(yml).toMatch(
-      /inputs\.prerelease\s*\}\}"\s*=\s*"true"\s*\][\s\S]{0,300}git push origin/,
+      /steps\.mode\.outputs\.staging\s*\}\}"\s*=\s*"true"\s*\][\s\S]{0,300}git push origin/,
     );
+  });
+
+  it('uses the pushed tag verbatim on a tag-triggered run', () => {
+    // Deriving the tag from package.json on a tag push would publish assets
+    // under a tag that differs from the one the operator pushed.
+    expect(yml).toMatch(/github\.event_name\s*\}\}"\s*=\s*"push"[\s\S]{0,120}github\.ref_name/);
   });
 });
 

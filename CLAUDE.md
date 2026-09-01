@@ -302,8 +302,23 @@ mismatch. A release published without it degrades installs to unverified.
 
 A production release is effectively irreversible — every teammate's installer
 resolves `releases/latest` the moment it publishes — so the whole path can be
-rehearsed first. **Actions → Release → Run workflow** with `prerelease` ticked
-and `tag` set to a staging tag (e.g. `v1.6.0-rc.1`):
+rehearsed first. Two ways in:
+
+- **Push an `-rc` tag** (`v*-rc*`) from **any branch**. This is the only route
+  that works *before* a merge, because `workflow_dispatch` is offered only for
+  workflows on the default branch — a feature branch cannot dispatch Release at
+  all. (`ci.yml` demonstrates the asymmetry: it isn't on `main`, yet it runs on
+  PRs, because `push`/`pull_request` triggers use the workflow file from the
+  pushed ref.)
+
+  ```sh
+  git tag v1.6.0-rc.1 && git push origin v1.6.0-rc.1
+  ```
+
+- **Actions → Release → Run workflow** with `prerelease` ticked and `tag` set
+  (e.g. `v1.6.0-rc.1`) — available once the workflow is on `main`.
+
+Either way the run is *staging*, which means:
 
 - The release is flagged **pre-release**, which GitHub excludes from *both* the
   `/releases/latest` API and the `releases/latest` redirect. Those are the only
@@ -318,6 +333,13 @@ and `tag` set to a staging tag (e.g. `v1.6.0-rc.1`):
 Everything else — kernel matrix, bundles, `SHA256SUMS`, attestation — runs
 exactly as in a real release; that's the point, since those are the parts that
 can only fail in CI.
+
+The staging-vs-production decision is made **once**, in the `Resolve release
+mode` step, and **fails closed**: a run is staging unless it is a
+`workflow_dispatch`, *from the default branch*, with `prerelease` unticked. So a
+tag push or a branch dispatch is structurally incapable of cutting a production
+release — it does not depend on remembering to tick the box. Plain `vX.Y.Z` tags
+deliberately do **not** trigger the workflow; production goes through dispatch.
 
 **Tags must start with `v`.** `install.sh` normalizes a bare tag by prepending
 `v` (`case "$version" in v*) ;; *) version="v$version" ;; esac`), so a release
