@@ -334,6 +334,15 @@ Everything else — kernel matrix, bundles, `SHA256SUMS`, attestation — runs
 exactly as in a real release; that's the point, since those are the parts that
 can only fail in CI.
 
+**`RELEASE_PAT` is required only for a production release.** It exists so the
+CHANGELOG-promote commit can push past the branch ruleset; a staging run pushes
+nothing, so `checkout` falls back to the job's own `GITHUB_TOKEN`
+(`secrets.RELEASE_PAT || github.token`). Without that fallback an unset secret
+interpolates to the empty string and `checkout` dies at step 2 with `Input
+required and not supplied: token` — which is how the first staging run failed.
+A *production* run without the PAT is failed fast, with an explanatory error, by
+the `Resolve release mode` step rather than 20 minutes later at the push.
+
 The staging-vs-production decision is made **once**, in the `Resolve release
 mode` step, and **fails closed**: a run is staging unless it is a
 `workflow_dispatch`, *from the default branch*, with `prerelease` unticked. So a

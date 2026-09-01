@@ -148,7 +148,18 @@ jobs:
           # RELEASE_PAT secret with: contents:write on this repo, no other
           # scopes. Rotate per your token policy; the workflow only runs
           # on manual dispatch so the blast radius is small.
-          token: ${{ secrets.RELEASE_PAT }}
+          #
+          # Falls back to the job's own GITHUB_TOKEN when the secret is unset.
+          # An unset secret interpolates to the EMPTY STRING, and checkout
+          # rejects that outright — "Input required and not supplied: token" —
+          # so without this fallback the job dies at step 2, before it can even
+          # report what is wrong. That is pure friction for a STAGING run,
+          # which pushes nothing and therefore never needs the elevated token:
+          # `contents: write` on the default GITHUB_TOKEN is enough to create
+          # the release. A production run genuinely does need the PAT, so the
+          # "Resolve release mode" step below fails it fast and explains why,
+          # rather than letting it build for 20 minutes and die at the push.
+          token: ${{ secrets.RELEASE_PAT || github.token }}
       - uses: actions/setup-node@v6
         with:
           node-version: 22
@@ -167,6 +178,11 @@ jobs:
         # structurally incapable of promoting the CHANGELOG, pushing to main,
         # or becoming `releases/latest`. It does not depend on the operator
         # remembering to tick a box.
+        env:
+          # Read as an env var, not interpolated into the script: keeps the
+          # secret out of the rendered command line, and lets us test only
+          # whether it is SET without ever echoing it.
+          RELEASE_PAT: ${{ secrets.RELEASE_PAT }}
         run: |
           set -euo pipefail
           STAGING=true
@@ -176,6 +192,16 @@ jobs:
             STAGING=false
           fi
           echo "staging=$STAGING" >> "$GITHUB_OUTPUT"
+
+          # A production run pushes the CHANGELOG promote (and possibly a
+          # lock-file sync) to the default branch, which needs the PAT to get
+          # past the branch ruleset. Checking here means the run fails in
+          # seconds with an actionable message instead of after the full
+          # kernel + bundle build. Staging never pushes, so it is exempt.
+          if [ "$STAGING" = "false" ] && [ -z "${RELEASE_PAT:-}" ]; then
+            echo "::error::A production release needs the RELEASE_PAT secret (fine-grained, contents:write on this repo). Without it the CHANGELOG promote cannot push to ${{ github.event.repository.default_branch }}. Set it in Settings → Secrets and variables → Actions, or re-run as a staging build (push a v*-rc* tag, or tick 'prerelease')."
+            exit 1
+          fi
           if [ "$STAGING" = "true" ]; then
             echo "::notice::STAGING run (event=${{ github.event_name }}, ref=${{ github.ref }}) — publishes a pre-release, does not touch ${{ github.event.repository.default_branch }}."
           else

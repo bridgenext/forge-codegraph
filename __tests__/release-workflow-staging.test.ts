@@ -170,6 +170,26 @@ describe('release workflow: staging (pre-release) mode', () => {
     );
   });
 
+  it('checks out without RELEASE_PAT, so a staging run needs no elevated token', () => {
+    // An unset secret interpolates to '' and actions/checkout rejects it with
+    // "Input required and not supplied: token" at step 2 — observed on the
+    // first real staging run. A rehearsal pushes nothing, so requiring the
+    // maintainer PAT to run one is friction with no security benefit.
+    expect(yml).toMatch(/token:\s*\$\{\{\s*secrets\.RELEASE_PAT\s*\|\|\s*github\.token\s*\}\}/);
+    // ...and the bare form must be gone, or the fallback is dead code.
+    expect(yml).not.toMatch(/token:\s*\$\{\{\s*secrets\.RELEASE_PAT\s*\}\}\s*$/m);
+  });
+
+  it('fails a production run fast when RELEASE_PAT is missing', () => {
+    // The fallback above must not silently downgrade a REAL release: without
+    // the PAT its CHANGELOG push cannot pass the branch ruleset, so catch it
+    // before the kernel + bundle build rather than at the push 20 minutes in.
+    expect(yml).toMatch(/RELEASE_PAT:\s*\$\{\{\s*secrets\.RELEASE_PAT\s*\}\}/);
+    expect(yml).toMatch(
+      /\[\s*"\$STAGING"\s*=\s*"false"\s*\]\s*&&\s*\[\s*-z\s*"\$\{RELEASE_PAT:-\}"\s*\][\s\S]{0,400}exit 1/,
+    );
+  });
+
   it('uses the pushed tag verbatim on a tag-triggered run', () => {
     // Deriving the tag from package.json on a tag push would publish assets
     // under a tag that differs from the one the operator pushed.
