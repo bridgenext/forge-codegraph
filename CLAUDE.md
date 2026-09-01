@@ -298,6 +298,46 @@ Once `package.json` is at the target version on `main`, trigger
 verify every downloaded archive against it and refuse to install on a
 mismatch. A release published without it degrades installs to unverified.
 
+#### Rehearsing a release (staging / pre-release)
+
+A production release is effectively irreversible — every teammate's installer
+resolves `releases/latest` the moment it publishes — so the whole path can be
+rehearsed first. **Actions → Release → Run workflow** with `prerelease` ticked
+and `tag` set to a staging tag (e.g. `v1.6.0-rc.1`):
+
+- The release is flagged **pre-release**, which GitHub excludes from *both* the
+  `/releases/latest` API and the `releases/latest` redirect. Those are the only
+  two ways `install.sh` discovers a version, so a default install can never
+  resolve to a staging build. Reach it deliberately with
+  `CODEGRAPH_VERSION=v1.6.0-rc.1`.
+- The CHANGELOG promote is **skipped** and no step pushes to `main`, so a
+  rehearsal can't consume the `[Unreleased]` block or move the branch. Notes
+  come from `[Unreleased]`, and an empty block doesn't fail the run.
+- The tag comes from the input, so staging needs no `package.json` bump.
+
+Everything else — kernel matrix, bundles, `SHA256SUMS`, attestation — runs
+exactly as in a real release; that's the point, since those are the parts that
+can only fail in CI.
+
+**Tags must start with `v`.** `install.sh` normalizes a bare tag by prepending
+`v` (`case "$version" in v*) ;; *) version="v$version" ;; esac`), so a release
+published as `dev` is unreachable — the installer looks for `vdev` and 404s.
+The workflow normalizes the same way to prevent publishing one. (The repo has a
+leftover `dev` pre-release carrying **0 assets**; it is inert because
+pre-releases are excluded from `latest`, but it should be deleted.)
+
+**Never reuse a production tag for a staging run:** the workflow's re-run branch
+only refreshes assets via `gh release upload --clobber` and will not flip an
+existing release's pre-release flag.
+
+To test the *installer* against a staging build without touching your real
+setup, sandbox its writes:
+
+```sh
+CODEGRAPH_VERSION=v1.6.0-rc.1 \
+CODEGRAPH_INSTALL_DIR=/tmp/cgtest CODEGRAPH_BIN_DIR=/tmp/cgbin sh install.sh
+```
+
 **Do not run `npm publish`, `git push`, or `git tag` yourself** — these are
 publish actions on shared state. Write the files, hand the user the commands.
 
