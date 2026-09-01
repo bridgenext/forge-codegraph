@@ -2,11 +2,13 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 
-// Project page on GitHub Pages: https://colbymchenry.github.io/codegraph/
-// `site` + `base` make every internal link resolve under the /codegraph/ prefix.
+// Project page on GitHub Pages: https://bridgenext.github.io/forge-codegraph/
+// `site` + `base` make every internal link resolve under the repo-name prefix.
+// GitHub Pages serves a project page at /<repo-name>/, so `base` must match the
+// repository name — this fork is `forge-codegraph`, not `codegraph`.
 export default defineConfig({
-	site: 'https://colbymchenry.github.io',
-	base: '/codegraph',
+	site: 'https://bridgenext.github.io',
+	base: '/forge-codegraph',
 	integrations: [
 		starlight({
 			title: 'codegraph',
@@ -26,7 +28,7 @@ export default defineConfig({
 				{
 					icon: 'github',
 					label: 'GitHub',
-					href: 'https://github.com/colbymchenry/codegraph',
+					href: 'https://github.com/bridgenext/forge-codegraph',
 				},
 			],
 			customCss: [

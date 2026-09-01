@@ -1,0 +1,28 @@
+# Line-ending policy.
+#
+# Only the cases where the wrong ending is a real defect are pinned; everything
+# else keeps git's default so this file doesn't churn the whole working tree.
+#
+# Shell scripts are the dangerous case. `install.sh` is fetched and piped
+# straight into `sh` by the documented install command, and a CR at the end of
+# each line makes a POSIX shell fail with `$'\r': command not found` — or, more
+# insidiously, succeed while appending a CR to every variable it sets, so the
+# download URL it builds is subtly wrong. `core.autocrlf=true` (the Git for
+# Windows default) already normalizes these to LF on commit, but that depends on
+# each contributor's local config; `eol=lf` makes it a property of the
+# repository instead, and keeps the working tree LF too so Docker builds and
+# shell-extracting tests (install-sh-*.test.ts) see what actually ships.
+*.sh text eol=lf
+
+# PowerShell is the mirror case: it is only ever run on Windows.
+*.ps1 text eol=crlf
+
+# Never let line-ending conversion touch a binary — a single byte rewritten
+# inside a grammar or a native module corrupts it silently.
+*.wasm binary
+*.node binary
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff binary
+*.woff2 binary

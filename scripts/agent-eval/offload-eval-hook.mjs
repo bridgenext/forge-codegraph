@@ -45,7 +45,7 @@ dbg(`found index at ${found}`);
 
 try {
   process.env.CODEGRAPH_OFFLOAD_DISABLE = '1'; // raw, accurate — never the unfixed offload
-  process.env.CODEGRAPH_TELEMETRY = '0'; process.env.DO_NOT_TRACK = '1';
+  process.env.DO_NOT_TRACK = '1';
   const load = async (rel) => import(pathToFileURL(resolve(ENGINE, rel)).href);
   const idx = await load('dist/index.js');
   const tools = await load('dist/mcp/tools.js');

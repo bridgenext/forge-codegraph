@@ -279,7 +279,7 @@ function cleanupLegacyLocalMcp(): WriteResult['files'][number] | null {
  * a pre-0.8 install wrote. Those installers added
  * `PostToolUse(Edit|Write) → codegraph mark-dirty` and
  * `Stop → codegraph sync-if-dirty` (local builds used the
- * `npx @colbymchenry/codegraph …` form, which still contains the
+ * `npx @bridgenext/codegraph …` form, which still contains the
  * `codegraph <subcommand>` substring). Both subcommands were later
  * removed from the CLI, so the Stop hook fails every turn with
  * "unknown command 'sync-if-dirty'". Matching on the codegraph-scoped
@@ -309,7 +309,7 @@ const PROMPT_HOOK_COMMAND = process.platform === 'win32'
 /**
  * Every spelling the installer has ever written (a settings.json can carry
  * the other platform's form across a sync). Matched by substring so an
- * `npx @colbymchenry/codegraph prompt-hook` form is recognized too.
+ * `npx @bridgenext/codegraph prompt-hook` form is recognized too.
  */
 const PROMPT_HOOK_FORMS = ['codegraph prompt-hook', 'codegraph.cmd prompt-hook'];
 function isPromptHookCommand(command: unknown): boolean {

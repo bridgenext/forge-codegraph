@@ -13,7 +13,6 @@
  * `--print-config` CLI flags.
  */
 
-import { execSync } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import {
@@ -29,8 +28,10 @@ import type { AgentTarget, Location, TargetId } from './targets/types';
 import { watchDisabledReason } from '../sync/watch-policy';
 import { isGitRepo, isSyncHookInstalled, installGitSyncHook } from '../sync/git-hooks';
 import { getCodeGraphDir, codeGraphDirName } from '../directory';
-import { getTelemetry, TELEMETRY_DOCS } from '../telemetry';
-import { maybeOfferBetaSignup } from './beta-signup';
+// Pure PATH scan + the fork's canonical installer URLs. `../upgrade` pulls in
+// only fs/path/https/child_process, so importing it here does not break the
+// installer's "importable without native modules" property.
+import { hasCommand, INSTALL_SH_URL, INSTALL_PS1_URL } from '../upgrade';
 
 // Backwards-compat: keep these named exports — downstream code may
 // import them. The shim in `config-writer.ts` continues to re-export
@@ -92,9 +93,9 @@ export async function runInstallerWithOptions(opts: RunInstallerOptions): Promis
   const useDefaults = opts.yes === true;
 
   // Step 1: which agent targets? Asked FIRST so the user knows what
-  // they're committing to before we touch npm or disk. Detection
-  // probes the user-provided location if known, else 'global' as the
-  // most common default — labels are a hint, not load-bearing.
+  // they're committing to before we touch disk. Detection probes the
+  // user-provided location if known, else 'global' as the most common
+  // default — labels are a hint, not load-bearing.
   const detectionLocation: Location = opts.location ?? 'global';
   const targets = await resolveTargets(clack, opts, detectionLocation, useDefaults);
   if (targets.length === 0) {
@@ -102,32 +103,26 @@ export async function runInstallerWithOptions(opts: RunInstallerOptions): Promis
     return;
   }
 
-  // Step 2: install the codegraph npm package on PATH (always offered;
-  // matches existing behavior). Skipped when --yes (assume present).
-  if (!useDefaults) {
-    const shouldInstallGlobally = await clack.confirm({
-      message: 'Install the codegraph CLI on your PATH? (Required so agents can launch the MCP server)',
-      initialValue: true,
-    });
-    if (clack.isCancel(shouldInstallGlobally)) {
-      clack.cancel('Installation cancelled.');
-      process.exit(0);
-    }
-    if (shouldInstallGlobally) {
-      const s = clack.spinner();
-      s.start('Installing codegraph CLI...');
-      try {
-        // Generous bound (slow networks / cold npm cache) — but bounded, so a
-        // wedged npm can't hang the interactive installer forever (#1139).
-        execSync('npm install -g @colbymchenry/codegraph', { stdio: 'pipe', windowsHide: true, timeout: 120_000 });
-        s.stop('Installed codegraph CLI on PATH');
-      } catch {
-        s.stop('Could not install (permission denied)');
-        clack.log.warn('Try: sudo npm install -g @colbymchenry/codegraph');
-      }
-    } else {
-      clack.log.info('Skipped CLI install — agents will not be able to launch the MCP server without it');
-    }
+  // Step 2: confirm the `codegraph` launcher is on PATH — the agents we
+  // configure below launch the MCP server by that name, so a missing launcher
+  // means every one of them silently fails to start the server.
+  //
+  // Upstream globally installed the UPSTREAM package from the public registry
+  // here. In this fork that call would (a) fetch a different project's code
+  // over the one the user just installed, and (b) fail outright, since the fork
+  // publishes nothing to npm. It was also redundant: reaching this code means
+  // the user is already running an installed `codegraph`. We therefore only
+  // VERIFY (a pure PATH scan — no subprocess, no network) and point at the
+  // fork's installer when the check fails. `subprocess-timeouts.test.ts` pins
+  // that this file spawns nothing at all.
+  if (!useDefaults && !hasCommand('codegraph')) {
+    clack.log.warn('The `codegraph` launcher is not on your PATH.');
+    clack.log.info(
+      'Agents launch the MCP server by running `codegraph`, so install it first:\n' +
+      `  macOS / Linux:  curl -fsSL ${INSTALL_SH_URL} | sh\n` +
+      `  Windows:        irm ${INSTALL_PS1_URL} | iex\n` +
+      'Then re-run `codegraph install`. (Already installed? Open a new terminal so PATH refreshes.)',
+    );
   }
 
   // Step 3: where the per-agent config files should land.
@@ -182,30 +177,7 @@ export async function runInstallerWithOptions(opts: RunInstallerOptions): Promis
     autoAllow = false;
   }
 
-  // Step 4½: anonymous usage telemetry — a visible default-on toggle, asked
-  // exactly once. Skipped when an env var (DO_NOT_TRACK / CODEGRAPH_TELEMETRY)
-  // already decides, or when a previous run stored a choice — re-runs and
-  // upgrades never re-ask.
-  if (!useDefaults && getTelemetry().getStatus().decidedBy === 'default' && !getTelemetry().hasStoredChoice()) {
-    const share = await clack.confirm({
-      message: 'Share anonymous usage stats? (No code, paths, or names — see TELEMETRY.md)',
-      initialValue: true,
-    });
-    if (clack.isCancel(share)) {
-      // Don't kill the install over the telemetry question — leave it
-      // undecided (the documented default + first-run notice applies later).
-      clack.log.info('Skipped — manage anytime with `codegraph telemetry on|off`.');
-    } else {
-      getTelemetry().setEnabled(share, 'installer');
-      clack.log.info(
-        share
-          ? `Thanks! Exactly what is collected: ${TELEMETRY_DOCS}`
-          : 'Telemetry disabled — nothing will be collected or sent.',
-      );
-    }
-  }
-
-  // Step 4¾: front-load prompt hook (Claude Code only). A UserPromptSubmit hook
+  // Step 4½: front-load prompt hook (Claude Code only). A UserPromptSubmit hook
   // that runs `codegraph prompt-hook` — it injects codegraph_explore context on
   // structural ("how / where / trace / impact") prompts so the agent reliably
   // reaches for the graph instead of grepping. Opt-in, default-yes. Only Claude
@@ -232,8 +204,6 @@ export async function runInstallerWithOptions(opts: RunInstallerOptions): Promis
 
   // Step 5: per-target install loop.
   const installedIds: TargetId[] = [];
-  let sawCreated = false;
-  let sawUpdated = false;
   for (const target of targets) {
     if (!target.supportsLocation(location)) {
       clack.log.warn(
@@ -244,8 +214,6 @@ export async function runInstallerWithOptions(opts: RunInstallerOptions): Promis
     const result = target.install(location, { autoAllow, promptHook });
     installedIds.push(target.id);
     for (const file of result.files) {
-      if (file.action === 'created') sawCreated = true;
-      if (file.action === 'updated') sawUpdated = true;
       const verb = file.action === 'unchanged'
         ? 'Unchanged'
         : file.action === 'created' ? 'Created'
@@ -256,27 +224,6 @@ export async function runInstallerWithOptions(opts: RunInstallerOptions): Promis
     for (const note of result.notes ?? []) {
       clack.log.info(`${target.displayName}: ${note}`);
     }
-  }
-
-  // Telemetry: which agents were configured, where, fresh-vs-upgrade (derived
-  // from the file actions above). Target IDs and the location enum only.
-  if (installedIds.length > 0) {
-    getTelemetry().recordLifecycle('install', {
-      targets: installedIds,
-      scope: location,
-      kind: sawCreated ? 'fresh' : sawUpdated ? 'upgrade' : 'reinstall',
-    });
-  }
-
-  // Step 5½: CodeGraph Pro beta opt-in — the same waitlist as the
-  // getcodegraph.com homepage form, offered once per machine at the end of a
-  // successful install (and after `codegraph upgrade` — the shared gate in
-  // maybeOfferBetaSignup means whichever asks first is the ONLY ask ever).
-  // Strictly opt-in (user answers yes AND types an email), never shown under
-  // --yes, and any yes/no answer is stored so nothing re-asks. Cancel or a
-  // failed submit stores nothing, so a later install/upgrade may offer again.
-  if (!useDefaults && installedIds.length > 0) {
-    await maybeOfferBetaSignup({ source: 'cli-install' });
   }
 
   // Step 6: install wires up agents only — it deliberately does NOT index.
@@ -291,10 +238,6 @@ export async function runInstallerWithOptions(opts: RunInstallerOptions): Promis
       '\n# (codegraph install --init does both steps in one command)',
     'Next: index a project',
   );
-
-  // Deliver buffered telemetry while we're already in a long interactive
-  // command — bounded (~1.5s worst case), invisible after a multi-second install.
-  await getTelemetry().flushNow();
 
   const finalNote = targets.length > 0
     ? `Done! Restart your agent${targets.length > 1 ? 's' : ''} to use CodeGraph.`
@@ -552,7 +495,7 @@ export async function runUninstaller(opts: RunUninstallerOptions): Promise<void>
         if (result.npm === 'removed') {
           clack.log.success('Removed the npm global package (npm uninstall -g).');
         } else if (result.npm === 'failed') {
-          clack.log.warn('npm uninstall failed — run `npm uninstall -g @colbymchenry/codegraph` yourself (EACCES usually means it needs sudo).');
+          clack.log.warn('npm uninstall failed — run `npm uninstall -g @bridgenext/codegraph` yourself (EACCES usually means it needs sudo).');
         }
         for (const p of result.leftovers) {
           clack.log.warn(`Could not remove ${tildify(p)} — delete it manually${process.platform === 'win32' ? ' after this window closes' : ''}.`);
@@ -562,16 +505,9 @@ export async function runUninstaller(opts: RunUninstallerOptions): Promise<void>
           clack.log.info('If your PATH still lists a codegraph bin directory, remove that entry from your user PATH.');
         }
       } else {
-        clack.log.info('Kept the CLI. Remove it later with `codegraph uninstall` or `npm uninstall -g @colbymchenry/codegraph`.');
+        clack.log.info('Kept the CLI. Remove it later with `codegraph uninstall` or `npm uninstall -g @bridgenext/codegraph`.');
       }
     }
-  }
-
-  // Telemetry churn signal (agent IDs only) — flush now, since after an
-  // uninstall there is usually no "next run" to deliver it.
-  if (removed.length > 0) {
-    getTelemetry().recordLifecycle('uninstall', { targets: removed.map((r) => r.id) });
-    await getTelemetry().flushNow();
   }
 
   // Step 5: summary.

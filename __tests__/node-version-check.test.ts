@@ -35,9 +35,9 @@ describe('buildNode25BlockBanner', () => {
     expect(banner).toContain('CODEGRAPH_ALLOW_UNSAFE_NODE=1');
   });
 
-  it('links to issue #81 for the root-cause writeup', () => {
+  it('links to this fork for the root-cause writeup', () => {
     expect(buildNode25BlockBanner('25.7.0')).toContain(
-      'github.com/colbymchenry/codegraph/issues/81'
+      'github.com/bridgenext/forge-codegraph/issues'
     );
   });
 });

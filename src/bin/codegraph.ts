@@ -52,7 +52,6 @@ import { installFatalHandlers } from './fatal-handler';
 import { relaunchWithWasmRuntimeFlagsIfNeeded } from '../extraction/wasm-runtime-flags';
 import { installCommandSupervision } from './command-supervision';
 import { EXTRACTION_VERSION } from '../extraction/extraction-version';
-import { getTelemetry, TELEMETRY_DOCS, recordIndexEvent } from '../telemetry';
 
 // Decided once, before `--color`/`--no-color` are stripped from argv below
 // (#1281). Piped/redirected stdout, NO_COLOR, or --no-color -> plain output.
@@ -68,7 +67,7 @@ async function loadCodeGraph(): Promise<typeof import('../index')> {
     console.error(`${red}${getGlyphs().err}${reset} Failed to load CodeGraph modules.`);
     console.error(`\n  Node: ${process.version}  Platform: ${process.platform} ${process.arch}`);
     console.error(`\n  Error: ${msg}`);
-    console.error('\n  Try reinstalling with: npm install -g @colbymchenry/codegraph\n');
+    console.error('\n  Try reinstalling with: npm install -g @bridgenext/codegraph\n');
     process.exit(1);
   }
 }
@@ -210,27 +209,6 @@ program
   // honored, and piped output defaults to no color (#1281).
   .option('--color', 'force ANSI colors even when stdout is not a TTY')
   .option('--no-color', 'disable ANSI colors (NO_COLOR env is also honored)');
-
-// Anonymous usage telemetry (see TELEMETRY.md): record the invoked subcommand
-// NAME only — never arguments or paths. Counts buffer locally; network sends
-// piggyback on commands that run long anyway (quick commands only append to
-// the local buffer at exit, costing nothing).
-// install/uninstall are absent on purpose: the installer flushes at its own
-// end, AFTER its consent prompt — a flush here would fire the first-run
-// notice before the user ever sees the toggle.
-const TELEMETRY_FLUSH_COMMANDS = new Set(['init', 'uninit', 'index', 'sync', 'upgrade']);
-program.hook('preAction', (_thisCommand, actionCommand) => {
-  try {
-    // The detached daemon re-invokes `serve --mcp` internally — not a user action.
-    if (process.env.CODEGRAPH_DAEMON_INTERNAL) return;
-    const name = actionCommand.name();
-    if (name === 'telemetry') return; // managing telemetry is not usage
-    getTelemetry().recordUsage('cli_command', name, true);
-    if (TELEMETRY_FLUSH_COMMANDS.has(name)) getTelemetry().maybeFlush();
-  } catch {
-    /* telemetry must never break the CLI */
-  }
-});
 
 // =============================================================================
 // Helper Functions
@@ -589,19 +567,6 @@ function writeErrorLog(projectPath: string, errors: Array<{ message: string; fil
   fs.writeFileSync(logPath, lines.join('\n') + '\n');
 }
 
-/**
- * Telemetry for a completed full index (see TELEMETRY.md). The bounded flush
- * keeps init/index responsive (these commands just ran for seconds anyway)
- * while delivering the event promptly.
- */
-async function recordIndexTelemetry(
-  cg: { getStats(): { filesByLanguage: Record<string, number> }; getBackend(): string },
-  result: IndexResult,
-): Promise<void> {
-  recordIndexEvent(cg, result);
-  await getTelemetry().flushNow();
-}
-
 // =============================================================================
 // Commands
 // =============================================================================
@@ -676,7 +641,6 @@ async function runInit(
     };
     const result = await runIndex();
     printIndexResult(clack, result, projectPath);
-    await recordIndexTelemetry(cg, result);
 
     // An empty graph at a git super-repo usually means `.gitignore` excludes
     // the child repos that hold the code — surface them and offer to opt in
@@ -762,13 +726,6 @@ program
       } catch { /* non-fatal */ }
 
       success(`Removed CodeGraph from ${projectPath}`);
-
-      // Churn signal — and flush now, since after an uninit there may be no
-      // "next run" to deliver it.
-      try {
-        getTelemetry().recordLifecycle('uninstall', {});
-        await getTelemetry().flushNow();
-      } catch { /* non-fatal */ }
     } catch (err) {
       error(`Failed to uninitialize: ${err instanceof Error ? err.message : String(err)}`);
       process.exit(1);
@@ -848,7 +805,6 @@ program
         const result = await renderIndex();
 
         printIndexResult(clack, result, projectPath);
-        await recordIndexTelemetry(cg, result);
 
         // Empty graph at a git super-repo → likely `.gitignore`d child repos;
         // name them and offer to opt in instead of a silent 0-node result (#1156).
@@ -1345,13 +1301,6 @@ program
       try { input = JSON.parse(raw); } catch { return; }
       const prompt = String(input.prompt || '');
 
-      // Gate telemetry: how often each tier fires vs. no-ops — counter names
-      // only, NEVER prompt content (see TELEMETRY.md). This is the data that
-      // turns "is the gate any good" from vibes into a measured recall rate.
-      const gate = (outcome: string): void => {
-        try { getTelemetry().recordUsage('cli_command', `prompt-hook-gate-${outcome}`, true); } catch { /* never break the hook */ }
-      };
-
       // Gate, tiered by confidence (#994, #1126):
       //   HIGH   — a structural keyword (any covered language), or a code-shaped
       //            token verified in the index → full explore injection.
@@ -1368,7 +1317,7 @@ program
       const keyworded = hasStructuralKeyword(prompt);
       const codeTokens = keyworded ? [] : extractCodeTokens(prompt);
       const proseWords = keyworded ? [] : extractProseCandidates(prompt);
-      if (!keyworded && codeTokens.length === 0 && proseWords.length === 0) { gate('noop-shape'); return; }
+      if (!keyworded && codeTokens.length === 0 && proseWords.length === 0) return;
 
       // Decide what to inject, shaped by WHERE the index(es) are: the nearest
       // indexed ancestor of cwd, or — when cwd is an un-indexed workspace root
@@ -1378,7 +1327,7 @@ program
       // root (it only walked up), so the validated adoption lever never fired
       // exactly where the agent most needs it.
       const plan = planFrontload(String(input.cwd || process.cwd()), prompt);
-      if (!plan.exploreRoot && plan.nudgeProjects.length === 0) { gate('noop-no-index'); return; } // nothing reachable — the agent's normal tools apply
+      if (!plan.exploreRoot && plan.nudgeProjects.length === 0) return; // nothing reachable — the agent's normal tools apply
 
       // A "pass projectPath" line for indexed sub-projects we did NOT front-load.
       // Follow-up codegraph_explore calls against a sub-project (cwd isn't its
@@ -1415,14 +1364,9 @@ program
               process.stdout.write(
                 `<codegraph_context note="Structural context from CodeGraph for this prompt — treat returned source as already read; ${more}.">\n${body}${others}\n</codegraph_context>\n`,
               );
-              gate(keyworded ? 'high-keyword' : 'high-token');
-            } else {
-              // A high-* outcome must mean context was actually delivered —
-              // the funnel's noop-vs-high split is how gate recall is
-              // measured (#1143). An explore error or empty result is a
-              // delivery failure, not a gate success.
-              gate(keyworded ? 'noop-explore-keyword' : 'noop-explore-token');
             }
+            // An explore error or empty result injects nothing — the agent's
+            // normal tools apply, exactly as for a prompt the gate never fired on.
             return;
           }
 
@@ -1436,12 +1380,11 @@ program
           // (#1142). Heal it here: on a populated vocab this is one SELECT;
           // the actual backfill is a one-time batched pass whose cost the MCP
           // server's own catch-up sync usually pays first (it runs at every
-          // session start). A distinct noop outcome keeps a dormant vocab
-          // from polluting the noop-unverified recall signal.
+          // session start).
           const vocabReady = await cg.healSegmentVocabIfEmpty().catch(() => false);
-          if (!vocabReady) { gate('noop-vocab-empty'); return; }
+          if (!vocabReady) return;
           const related = cg.getSegmentMatches(proseWords);
-          if (related.length === 0) { gate('noop-unverified'); return; }
+          if (related.length === 0) return;
           const lines = related
             .map((m) => `  - ${m.name} (${m.kind} — ${m.filePath}:${m.startLine})`)
             .join('\n');
@@ -1454,7 +1397,6 @@ program
             `to get their source, call paths, and blast radius — cheaper and more complete than Read/Grep.\n${others}` +
             `</codegraph_context>\n`,
           );
-          gate('medium-segment');
         } finally {
           cg.destroy();
         }
@@ -1466,7 +1408,6 @@ program
           nudge(plan.nudgeProjects, "This workspace's CodeGraph indexes live in sub-projects. To use CodeGraph, call codegraph_explore with the projectPath of the relevant one:") +
           `</codegraph_context>\n`,
         );
-        gate('nudge-projects');
       }
     } catch {
       // Degradable by contract: never surface an error to the prompt pipeline.
@@ -2485,50 +2426,6 @@ program
   });
 
 /**
- * codegraph telemetry [on|off|status]
- */
-program
-  .command('telemetry [action]')
-  .description('Show or change anonymous usage telemetry (status, on, off)')
-  .action((action?: string) => {
-    const t = getTelemetry();
-
-    if (action === 'on' || action === 'off') {
-      t.setEnabled(action === 'on', 'cli');
-      if (action === 'on') {
-        success('Telemetry enabled — anonymous usage stats only (no code, paths, or names).');
-      } else {
-        success('Telemetry disabled. Buffered, unsent data was deleted.');
-      }
-      const effective = t.getStatus();
-      if (effective.decidedBy === 'DO_NOT_TRACK' || effective.decidedBy === 'CODEGRAPH_TELEMETRY') {
-        warn(
-          `The ${effective.decidedBy} environment variable overrides this choice — ` +
-          `effective state right now: ${effective.enabled ? 'enabled' : 'disabled'}.`
-        );
-      }
-      return;
-    }
-
-    if (action !== undefined && action !== 'status') {
-      error(`Unknown action: ${action} (expected status, on, or off)`);
-      process.exit(1);
-    }
-
-    const s = t.getStatus();
-    const decidedBy: Record<typeof s.decidedBy, string> = {
-      DO_NOT_TRACK: 'DO_NOT_TRACK environment variable',
-      CODEGRAPH_TELEMETRY: 'CODEGRAPH_TELEMETRY environment variable',
-      config: 'your saved choice',
-      default: 'default',
-    };
-    console.log(`\nTelemetry: ${s.enabled ? chalk.green('enabled') : chalk.yellow('disabled')} ${chalk.dim(`(${decidedBy[s.decidedBy]})`)}`);
-    console.log(`Machine ID: ${s.machineId ?? chalk.dim('(random UUID, created on first use)')}`);
-    console.log(`Config:     ${s.configPath}`);
-    console.log(chalk.dim(`\nExactly what is collected (and never collected): ${TELEMETRY_DOCS}\n`));
-  });
-
-/**
  * codegraph upgrade [version]
  *
  * Self-update, however CodeGraph was installed (bundle via install.sh/.ps1,
@@ -2561,10 +2458,6 @@ program
         warn: (m: string) => warn(m),
         error: (m: string) => error(m),
         platform: process.platform,
-        offerBetaSignup: async () => {
-          const { maybeOfferBetaSignup } = await import('../installer/beta-signup');
-          await maybeOfferBetaSignup({ source: 'cli-upgrade' });
-        },
       }
     );
     process.exit(code);

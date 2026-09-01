@@ -49,7 +49,6 @@ import {
 } from './daemon';
 import { connectWithHello, runLocalHandshakeProxy } from './proxy';
 import { getDaemonSocketCandidates, probeDaemonIdentity } from './daemon-paths';
-import { getTelemetry } from '../telemetry';
 import { checkForUpdateInBackground } from '../upgrade/update-check';
 import { EARLY_PPID } from './early-ppid';
 import { supervisionLostReason, parsePpidPollMs, parseHostPpid } from './ppid-watchdog';
@@ -271,11 +270,6 @@ export class MCPServer {
    * mode — a misbehaving daemon must never block a session from starting.
    */
   async start(): Promise<void> {
-    // Long-lived process (direct / proxy / daemon alike): flush buffered
-    // telemetry opportunistically. Fire-and-forget + unref'd — adds nothing
-    // to the handshake path and never keeps the process alive.
-    getTelemetry().startInterval();
-
     // #1243: the MCP config launches the local binary, so a server left
     // running drifts behind releases with no signal. Refresh the shared
     // update-check cache in the background and log ONE stderr notice when a

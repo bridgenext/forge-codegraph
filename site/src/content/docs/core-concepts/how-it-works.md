@@ -25,7 +25,7 @@ Everything goes into a local SQLite database (`.codegraph/codegraph.db`) with FT
 
 ## 3. Resolution
 
-After extraction, references are resolved: function calls → definitions, imports → source files, class inheritance, and framework-specific patterns. Some dynamic-dispatch boundaries (callbacks, observers, React re-render, JSX children) are bridged by synthesizers so flows connect end-to-end. See [Resolution & Frameworks](/codegraph/core-concepts/resolution/).
+After extraction, references are resolved: function calls → definitions, imports → source files, class inheritance, and framework-specific patterns. Some dynamic-dispatch boundaries (callbacks, observers, React re-render, JSX children) are bridged by synthesizers so flows connect end-to-end. See [Resolution & Frameworks](/forge-codegraph/core-concepts/resolution/).
 
 ## 4. Auto-sync
 

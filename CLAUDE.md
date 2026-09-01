@@ -6,7 +6,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 CodeGraph is a local-first code intelligence library + CLI + MCP server. It parses any supported codebase with tree-sitter, stores symbols/edges/files in SQLite (FTS5), and exposes a knowledge graph to AI agents (Claude Code, Cursor, Codex CLI, opencode) over MCP. Per-project data lives in `.codegraph/`. Extraction is deterministic — derived from AST, not LLM-summarized.
 
-Distributed as `@colbymchenry/codegraph` on npm; same binary serves as installer, indexer, and MCP server.
+**This is the Bridgenext fork ([bridgenext/forge-codegraph](https://github.com/bridgenext/forge-codegraph)), not upstream.** Two things differ from upstream and must not be reverted by a merge:
+
+1. **No telemetry.** Upstream's telemetry client, ingest worker, dashboard, and the installer's marketing e-mail signup are deleted — not flag-disabled. `__tests__/no-telemetry.test.ts` fails the build if any of it returns; see `docs/design/no-telemetry.md` for the full removal record and the allow-listed network hosts. When merging upstream, run that suite and delete whatever it flags rather than widening the allow-list.
+2. **Distribution is GitHub Releases only.** Nothing is published to npm. The package name is `@bridgenext/codegraph` and `src/upgrade/index.ts`'s `REPO` is `bridgenext/forge-codegraph`; `install.sh` / `install.ps1` download from this repo's releases and **verify the archive against `SHA256SUMS` before extracting**. `scripts/pack-npm.sh` is kept (already scoped to `@bridgenext`) in case an internal registry is added later, but no workflow runs it.
+
+Same binary serves as installer, indexer, and MCP server.
 
 ## Build, Test, Run
 
@@ -71,7 +76,7 @@ Defined in `src/types.ts`. Both extractors and resolvers must use these exact st
 
 ### Multi-agent installer
 
-`src/installer/` is the entry point for `codegraph install` (and the bare `codegraph`/`npx @colbymchenry/codegraph` invocation). Architecture:
+`src/installer/` is the entry point for `codegraph install` (and the bare `codegraph` invocation). Architecture:
 
 - `targets/registry.ts` lists every supported agent.
 - `targets/types.ts` defines the `AgentTarget` interface — adding a 5th agent (Continue, Zed, Windsurf…) is **one new file in `targets/` + one entry in `registry.ts`**. Each target owns its config-file location and MCP-server JSON/TOML/JSONC writing. (Targets no longer write an instructions file — see below.)
@@ -178,15 +183,28 @@ Behavior that differs by platform (path resolution, drive letters, `SENSITIVE_PA
 
 The dev machine — and the default `npm test` target — is **macOS**, so local runs cover the macOS path. The other two platforms aren't here; when a change is platform-sensitive (file watching, sockets / named pipes, path & symlink handling, process lifecycle, inotify budget) validate them for real rather than guessing.
 
+> **Bridgenext fork note.** The fork is maintained from a **Windows** box, which inverts the upstream assumption above: here it is the POSIX-gated tests that silently skip locally, so any change to file modes, socket permissions, or shell scripts must be run under Docker before it is called done. `Dockerfile.test` at the repo root exists for exactly this — it is not shipped and not used by CI:
+>
+> ```bash
+> docker build -f Dockerfile.test -t codegraph-test .
+> docker run --rm --init codegraph-test npx vitest run __tests__/installer-file-permissions.test.ts
+> ```
+>
+> Windows also produces a large, run-to-run-varying set of `EPERM`/`EBUSY` failures on temp-dir cleanup (~120–165 tests across ~37 files). **Never judge a regression from the Windows numbers alone** — diff the failing *test names* against a baseline run, and confirm anything new on Linux.
+>
+> Node must be **24+** locally: Node 22.15's bundled `node:sqlite` has no FTS5, and the suite fails with `no such module: fts5` in ~530 places, which looks like a code failure but is a runtime gap.
+
 ### Linux (Docker)
 
-When asked to test or validate on Linux, use **Docker** — there's no Linux box, but Docker runs on the macOS host. Build a throwaway image from the repo and run the suite inside it:
+When asked to test or validate on Linux, use **Docker**. Build a throwaway image from the repo and run the suite inside it:
 
-- `FROM node:22-bookworm`; `COPY` the repo with a `.dockerignore` excluding `node_modules`/`dist`/`.git`/`.codegraph`; `RUN npm ci && npm run build`. Don't reuse the Mac `node_modules` — `esbuild`/`rollup` ship platform-specific binaries.
+- `FROM node:24-bookworm`; `COPY` the repo with a `.dockerignore` excluding `node_modules`/`dist`/`.git`/`.codegraph`; `RUN npm ci && npm run build`. Don't reuse the host `node_modules` — `esbuild`/`rollup` ship platform-specific binaries.
 - Run with **`docker run --rm --init`**. The `--init` is load-bearing for any process-lifecycle test (daemon reaping, the #277 PPID watchdog, idle-timeout): without a zombie-reaping PID 1, a SIGKILL'd/exited process lingers as a zombie and `process.kill(pid, 0)` still reports it *alive*, so exit-detection assertions false-fail even though the process did exit.
 - Linux is where the inotify watch budget actually bites: count a process's watches via `/proc/<pid>/fdinfo/*` (sum `^inotify ` lines on the fd whose `readlink` is `anon_inode:inotify`).
 
 ### Windows (Parallels VM + SSH)
+
+Upstream's setup, kept for reference. **On the Bridgenext fork the dev box IS Windows**, so validate Windows behavior directly and use Docker (above) for the POSIX side instead.
 
 For any Windows-specific PR, bug, or implementation, validate it on the real Windows VM rather than guessing. Connection details live in the gitignored **`.parallels`** file at the repo root (VM name, guest IP, SSH user/key). `prlctl exec` needs Parallels Pro and is unavailable, so SSH is the bridge.
 
@@ -202,9 +220,27 @@ For any Windows-specific PR, bug, or implementation, validate it on the real Win
 - Fetch a contributor PR head straight from their fork to dodge `pull/<n>/head` lag: `git fetch <fork-url> <branch>` then `git checkout -f FETCH_HEAD`.
 - Known pre-existing Windows failures (they reproduce on `main`, unrelated to your change — confirm against `origin/main` before blaming your PR, and don't let them mask new regressions): `security.test.ts > Session marker symlink resistance > does not follow a pre-planted symlink` (symlink creation needs privileges on Windows); and the `mcp-initialize.test.ts` / `mcp-roots.test.ts` suites, which fail in `afterEach` with `EPERM` removing the temp dir because a spawned `serve --mcp` (its `--liftoff-only` re-exec grandchild) still holds the cwd / SQLite file open — a Windows file-locking quirk, not a logic bug.
 
+### Known pre-existing failures — measured baseline (2026-09-01)
+
+Measured on upstream `1.6.0` (`6a056ec`), two full passes per platform, so a PR can be judged against real numbers instead of guesswork. **Diff failing TEST NAMES against a baseline run; never conclude from a single run's totals.**
+
+| Platform | Result | Notes |
+|---|---|---|
+| Linux (Docker, Node 24, no kernel prebuild) | ~9–10 failed / ~3042 passed | The reliable signal — use this one |
+| Windows (Node 24, no kernel prebuild) | ~120–165 failed / ~2860 passed across ~37 files | Overwhelmingly `EPERM`/`EBUSY` temp-dir cleanup; the failing set churns every run |
+
+**Deterministic on Linux (failed in both passes, on upstream HEAD):**
+
+- `explore-factory-closure.test.ts` — 3 tests, and `explore-oversize-member.test.ts` — 1 test. Both assert delivered-line counts and fail with `expected 1 to be greater than 20`, on Windows and Linux alike. **Not a kernel-fallback artifact** — checked directly: building `codegraph-kernel` (`npm run build:kernel`) and re-running reproduces all four failures unchanged, so the wasm-vs-native extraction path is not the variable. These are genuine unfixed retrieval-quality regressions inherited from upstream; they need their own investigation and are out of scope for the fork work.
+- `sync-rebuild-convergence.test.ts` — 1 test (`stays converged across a sequence of adds, edits, renames and deletes`) failed in both full-suite passes but **passes when the file is run alone**, so it is load-sensitive rather than genuinely broken.
+
+**`install.sh` suites** (`install-sh-prune`, `install-sh-checksum`) fail if the working-tree `install.sh` has CRLF — they extract real blocks from it and run them under `sh`. `.gitattributes` now pins `*.sh` to `eol=lf` so this cannot recur; if you see `set: pipefail: invalid option name`, your working tree predates that and needs re-checking-out.
+
+Everything else that appears is load-sensitive flake: it passes when the file is run in isolation and appears in **both** arms of a with/without comparison.
+
 ## Releases
 
-Released to npm and mirrored as [GitHub Releases](https://github.com/colbymchenry/codegraph/releases). `CHANGELOG.md` is the source of truth; GitHub Release notes are extracted from it.
+Published as [GitHub Releases](https://github.com/bridgenext/forge-codegraph/releases) on this fork — **npm publishing is removed** (see the fork note at the top). `CHANGELOG.md` is the source of truth; GitHub Release notes are extracted from it.
 
 ### Writing changelog entries
 
@@ -228,10 +264,13 @@ Releases are built and published by the **GitHub Actions "Release" workflow**
 promote `[Unreleased]` into `[<version>]` (and auto-commit + push that
 CHANGELOG change back to `main` so on-disk truth matches the published
 notes), then bundles a Node runtime per platform (`scripts/build-bundle.sh`)
-and publishes both the GitHub Release and the npm thin-installer
-(`scripts/pack-npm.sh`: a shim package + per-platform packages).
-Publishing manually is **wrong** now — a plain `npm publish` ships the root
-package (non-bundled), which breaks anyone on Node < 22.5.
+and publishes the GitHub Release with a `SHA256SUMS` manifest.
+
+**This fork publishes nothing to npm.** Upstream's publish steps used OIDC
+trusted publishing bound to the upstream repo + `@colbymchenry` scope, which
+cannot work here; they were removed rather than left to fail, which also
+removes any path by which an internal build reaches a public registry. Never
+run `npm publish` in this repo.
 
 **Claude does NOT bump the version unless explicitly asked.** The maintainer
 typically does it themselves — often by editing `package.json` directly via
@@ -252,12 +291,24 @@ Once `package.json` is at the target version on `main`, trigger
 
 1. Syncs `package-lock.json` to `package.json`'s version if they've drifted; commits + pushes that change.
 2. Runs `prepare-release.mjs <X.Y.Z>` → promotes `[Unreleased]` → `[X.Y.Z] - <today>` in `CHANGELOG.md`, appends the link reference, commits + pushes the move with `[skip ci]`.
-3. Builds every platform bundle on one runner, generates `SHA256SUMS`.
+3. Builds every platform bundle on one runner, generates `SHA256SUMS`, and attests build provenance.
 4. Creates the GitHub Release with notes from the freshly-promoted `[X.Y.Z]` block.
-5. Publishes the npm shim + per-platform packages. Requires the `NPM_TOKEN` repo secret.
+
+`SHA256SUMS` is load-bearing, not decorative: `install.sh` / `install.ps1`
+verify every downloaded archive against it and refuse to install on a
+mismatch. A release published without it degrades installs to unverified.
 
 **Do not run `npm publish`, `git push`, or `git tag` yourself** — these are
 publish actions on shared state. Write the files, hand the user the commands.
+
+### CI
+
+`.github/workflows/ci.yml` runs on every push and PR to `main`: type check,
+build, the full test suite (Node 24 — older 22.x lines ship `node:sqlite`
+without FTS5, and the suite fails wholesale with `no such module: fts5` on
+them), plus a **blocking** `npm audit --omit=dev --audit-level=high` and a
+non-blocking dev-dependency audit. Don't add `|| true` to the production
+audit; if it goes red, fix or replace the dependency.
 
 ## House rules
 

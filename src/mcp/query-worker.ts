@@ -17,8 +17,8 @@
  * transport. The worker runs {@link ToolHandler.executeReadTool} — validation +
  * dispatch + error classification — and returns the raw {@link ToolResult}; the
  * MAIN thread keeps the catch-up gate, the watcher-state notices (staleness /
- * worktree), `codegraph_status`, and telemetry, none of which a watcher-less
- * read connection can answer.
+ * worktree) and `codegraph_status`, none of which a watcher-less read
+ * connection can answer.
  */
 
 import { parentPort, workerData } from 'worker_threads';

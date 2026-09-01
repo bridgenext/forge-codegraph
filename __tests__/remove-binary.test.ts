@@ -60,7 +60,7 @@ describe('planBinaryRemoval', () => {
     expect(plan.paths).toContain(`${STATE}/versions`);
     expect(plan.paths).toContain(`${STATE}/current`);
     expect(plan.paths).toContain(`${HOME}/.local/bin/codegraph`);
-    // The state dir (telemetry choice, daemon records) must survive.
+    // The state dir (daemon records, update-check cache) must survive.
     expect(plan.paths).not.toContain(STATE);
     expect(plan.npmGlobal).toBe(false);
     expect(plan.sourceRoot).toBeNull();

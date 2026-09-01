@@ -1,0 +1,126 @@
+name: CI
+
+# The repository previously ran NO automated checks: the only workflows were
+# the manually-dispatched release and the docs-site deploy. A regression in a
+# PR — or a newly-disclosed dependency advisory — reached `main` unnoticed and
+# was first discovered when someone ran the suite locally, if ever.
+#
+# This workflow is the gate: type check, build, test suite, and a dependency
+# audit on every push and pull request to main.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Test files carrying failures INHERITED from upstream 1.6.0 — they are not
+  # caused by, and do not gate, changes made in this fork. Measured 2026-09-01
+  # over two full passes of upstream HEAD (6a056ec) on Linux/Node 24; see the
+  # "Known pre-existing failures" table in CLAUDE.md for the numbers.
+  #
+  #   explore-factory-closure / explore-oversize-member — 4 tests assert
+  #     delivered-line counts and fail `expected 1 to be greater than 20`.
+  #     Verified NOT to be a wasm-vs-native extraction artifact: building
+  #     codegraph-kernel and re-running reproduces them unchanged.
+  #   sync-rebuild-convergence — fails only under full-suite parallel load;
+  #     passes when the file is run alone.
+  #
+  # They still RUN, in the non-blocking `known-failures` job below, so the
+  # signal stays visible and fixing them is a green-light rather than a
+  # silent no-op. Delete an entry here the moment its file passes — this list
+  # is a quarantine, not a permanent exemption.
+  QUARANTINED: >-
+    --exclude __tests__/explore-factory-closure.test.ts
+    --exclude __tests__/explore-oversize-member.test.ts
+    --exclude __tests__/sync-rebuild-convergence.test.ts
+
+jobs:
+  test:
+    name: Type check, build, test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # Node 24 is what the shipped bundle vendors, so this is the runtime
+          # users actually get. It also matters for correctness here: the suite
+          # needs `node:sqlite` built WITH FTS5, and older 22.x lines ship
+          # without it — every full-text test fails with "no such module: fts5"
+          # on those, which reads as a code failure but is purely a runtime gap.
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Type check
+        run: npx tsc --noEmit
+      - name: Build
+        run: npm run build
+      - name: Test
+        # `--retry=2` covers the residual order/load nondeterminism a shared CI
+        # runner adds (a handful of tests in this suite depend on real worker
+        # scheduling). It retries a FAILING test, so a genuine regression —
+        # which fails all three attempts — still turns the job red; only true
+        # flakes are absorbed. The per-test timeout lives in vitest.config.ts so
+        # local runs get the same treatment.
+        run: npx vitest run --retry=2 ${{ env.QUARANTINED }}
+
+  known-failures:
+    name: Quarantined upstream failures (non-blocking)
+    runs-on: ubuntu-latest
+    # Reports only. When this goes green, move its files back into `test`.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: |
+          npx vitest run \
+            __tests__/explore-factory-closure.test.ts \
+            __tests__/explore-oversize-member.test.ts \
+            __tests__/sync-rebuild-convergence.test.ts
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+
+      - name: Audit production dependencies
+        # BLOCKING. These are the packages that ship inside the bundle and run
+        # on a user's machine, so a high/critical advisory here is a real
+        # exposure. Keep this green — do not add `|| true`.
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Audit dev dependencies (report only)
+        # NON-BLOCKING by design. Dev-only advisories (test-runner and bundler
+        # chains) do not ship to users, and letting one of them redden `main`
+        # would train people to ignore the blocking job above. Reported so the
+        # backlog stays visible; triage it, don't silence it.
+        continue-on-error: true
+        run: npm audit --audit-level=moderate
+
+      - name: Assert no telemetry was reintroduced
+        # BLOCKING, and deliberately duplicated out of the test job: this is the
+        # property the fork exists to hold, so it gets a check that cannot be
+        # lost to a quarantine list or a slow test run.
+        run: |
+          npm run build
+          npx vitest run __tests__/no-telemetry.test.ts

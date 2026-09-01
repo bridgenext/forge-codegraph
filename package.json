@@ -1,10 +1,10 @@
 {
-  "name": "@colbymchenry/codegraph",
+  "name": "@bridgenext/codegraph",
   "version": "1.6.0",
-  "description": "Supercharge AI coding agents with semantic code intelligence — surgical context, fewer tool calls, faster answers. 100% local.",
+  "description": "Supercharge AI coding agents with semantic code intelligence — surgical context, fewer tool calls, faster answers. 100% local, no telemetry. Bridgenext internal fork of CodeGraph.",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/colbymchenry/codegraph.git"
+    "url": "git+https://github.com/bridgenext/forge-codegraph.git"
   },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -43,7 +43,7 @@
     "fast-wrap-ansi": "^0.2.0",
     "ignore": "^7.0.5",
     "jsonc-parser": "^3.3.1",
-    "picomatch": "^4.0.3",
+    "picomatch": "^4.0.7",
     "sisteransi": "^1.0.5",
     "tree-sitter-wasms": "^0.1.11",
     "web-tree-sitter": "^0.25.3"

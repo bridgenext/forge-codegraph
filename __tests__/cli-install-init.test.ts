@@ -33,7 +33,6 @@ function runCodegraph(args: string[], cwd: string): RunResult {
       env: {
         ...process.env,
         CODEGRAPH_NO_DAEMON: '1',
-        CODEGRAPH_TELEMETRY: '0',
         DO_NOT_TRACK: '1',
         NO_COLOR: '1',
       },

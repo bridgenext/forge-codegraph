@@ -21,8 +21,8 @@
  *   - A project-local npm install is left alone — the project's
  *     package.json owns it, not the machine-level uninstaller.
  *   - On unix the default install dir (`~/.codegraph`) doubles as the
- *     machine-level state dir (telemetry choice, daemon records, the
- *     update-check cache) — only the install ARTIFACTS (`versions/`,
+ *     machine-level state dir (daemon records, the update-check
+ *     cache) — only the install ARTIFACTS (`versions/`,
  *     `current`) are removed there, never the whole dir. A dedicated
  *     install dir (Windows `%LOCALAPPDATA%\codegraph`, or a custom
  *     `CODEGRAPH_INSTALL_DIR`) is removed wholesale.

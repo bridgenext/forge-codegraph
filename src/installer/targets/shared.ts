@@ -10,6 +10,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import {
   CODEGRAPH_INSTRUCTIONS_BLOCK,
   CODEGRAPH_SECTION_START,
@@ -66,26 +67,76 @@ export function readJsonFile(filePath: string): Record<string, any> {
     console.warn(`  Warning: Could not parse ${path.basename(filePath)}: ${msg}`);
     console.warn(`  A backup will be created before overwriting.`);
     try {
-      fs.copyFileSync(filePath, filePath + '.backup');
+      const backup = filePath + '.backup';
+      fs.copyFileSync(filePath, backup);
+      // The backup is a verbatim copy of a config that may hold MCP `env`
+      // secrets, so it must not be more readable than the original. Node
+      // creates the destination with the source's mode on the platforms we
+      // ship, but that is not a documented guarantee — restate it explicitly
+      // rather than depend on it for a file that can contain credentials.
+      try {
+        fs.chmodSync(backup, fs.statSync(filePath).mode & 0o777);
+      } catch { /* chmod is a no-op on some Windows/filesystem combinations */ }
     } catch { /* ignore backup failure */ }
     return {};
   }
 }
 
 /**
- * Write a file atomically: write to `<path>.tmp.<pid>`, then rename.
+ * Write a file atomically: write to a private temp sibling, then rename.
  *
- * Prevents corruption if the process crashes mid-write. The temp
- * file is cleaned up on rename failure.
+ * Prevents corruption if the process crashes mid-write. The temp file is
+ * cleaned up on rename failure.
+ *
+ * Two security properties this write must hold, because the files it targets
+ * are agent config files that routinely carry secrets — `~/.claude.json`
+ * stores MCP server definitions whose `env` blocks commonly hold API keys and
+ * tokens, alongside account metadata:
+ *
+ *   1. **Never widen permissions.** A rename replaces the inode, so the new
+ *      file carries the temp file's mode, not the original's. Writing with the
+ *      process umask therefore turned a user's `chmod 600 ~/.claude.json` into
+ *      a world-readable 0644 the first time `codegraph install` ran. We stat
+ *      the target and restore its exact mode before the rename. A file that
+ *      did not exist keeps the platform default (unchanged behavior) — we only
+ *      refuse to LOSEN what the user already chose.
+ *   2. **Never expose the content in transit.** The temp file is created
+ *      `wx` (O_CREAT|O_EXCL, so a pre-planted symlink or stale temp is a hard
+ *      failure rather than a target we follow) with mode 0600, and given a
+ *      random suffix so its name cannot be predicted and pre-created by
+ *      another user on a shared machine.
  */
 export function atomicWriteFileSync(filePath: string, content: string): void {
   const dir = path.dirname(filePath);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  const tmpPath = filePath + '.tmp.' + process.pid;
+
+  // Mode of the file we are about to replace, if any — restored below.
+  let existingMode: number | undefined;
   try {
-    fs.writeFileSync(tmpPath, content);
+    existingMode = fs.statSync(filePath).mode & 0o777;
+  } catch {
+    /* new file — platform default applies */
+  }
+
+  const tmpPath = `${filePath}.tmp.${process.pid}.${crypto.randomBytes(6).toString('hex')}`;
+  try {
+    // 'wx' => O_CREAT | O_EXCL: fails outright if the path already exists,
+    // which is what makes a symlink pre-planted at tmpPath unexploitable.
+    const fd = fs.openSync(tmpPath, 'wx', 0o600);
+    try {
+      fs.writeFileSync(fd, content);
+    } finally {
+      fs.closeSync(fd);
+    }
+    if (existingMode !== undefined) {
+      try {
+        fs.chmodSync(tmpPath, existingMode);
+      } catch {
+        /* chmod is a no-op on some Windows/filesystem combinations */
+      }
+    }
     fs.renameSync(tmpPath, filePath);
   } catch (err) {
     try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
