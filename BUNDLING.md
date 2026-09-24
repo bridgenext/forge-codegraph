@@ -41,8 +41,8 @@ linux/amd64`).
 
 ## Install channels
 
-**Bridgenext fork: only channels 1 and 2 are live.** The npm channel below is
-kept working in the tree but is **not published** — see "Release pipeline".
+**Bridgenext fork: channels 1-3 are live.** npm is the primary channel; the
+standalone installers remain for machines with no Node — see "Release pipeline".
 
 1. **`curl | sh`** ([`install.sh`](install.sh)) — no Node required; ideal for a
    fresh Linux VPS over SSH. Detects os/arch, pulls the archive from GitHub
@@ -52,16 +52,16 @@ kept working in the tree but is **not published** — see "Release pipeline".
 2. **Windows** ([`install.ps1`](install.ps1)) — `irm … | iex`; same flow as
    install.sh (detect arch, pull the `.zip` from Releases, verify the checksum,
    add to PATH).
-3. **npm — dormant in this fork.** ([`scripts/npm-shim.js`](scripts/npm-shim.js))
-   The machinery still works and is scoped to `@bridgenext/codegraph`: the main
+3. **npm — the primary channel.** ([`scripts/npm-shim.js`](scripts/npm-shim.js))
+   `npm i -g @bridgenext/codegraph`. Scoped to `@bridgenext/codegraph`: the main
    package is a tiny shim and the bundles ship as per-platform
    `optionalDependencies` (`@bridgenext/codegraph-<target>` with `os`/`cpu`), so
    npm installs only the matching one. The shim — run by the user's Node —
    execs the bundle, so the real work runs on the bundled Node 24, even on old
    Node. On Windows it invokes the bundled `node.exe` against the app entry
    directly (not the `.cmd` launcher) — modern Node throws `EINVAL` when asked
-   to spawn a `.cmd`/`.bat`. Nothing publishes it; wire up a registry and a
-   publish step if Bridgenext wants this channel.
+   to spawn a `.cmd`/`.bat`. `scripts/pack-npm.sh` assembles the publishable
+   layout and the release workflow publishes it.
 4. **Homebrew / Scoop** — TODO (tap + cask pointing at the Release archives).
 
 ## Release pipeline
@@ -71,10 +71,14 @@ triggered. Reads the version from `package.json`, builds every platform bundle o
 one runner, generates `SHA256SUMS`, attests build provenance, and creates the
 GitHub Release (notes from `CHANGELOG.md`).
 
-**No npm publish.** Upstream's publish steps used npm OIDC trusted publishing
-bound to the upstream repository and the `@colbymchenry` scope; that cannot work
-here, and removing the steps also removes any path by which an internal build
-reaches a public registry. No registry credentials are needed or stored.
+**npm publish.** The workflow runs `scripts/pack-npm.sh` and publishes the
+per-platform packages first, then the `@bridgenext/codegraph` shim that lists
+them as `optionalDependencies`. Needs an `NPM_TOKEN` secret with publish rights
+on the `@bridgenext` scope; a production run fails fast without it. Publishes
+with `--access public` (a scoped package is restricted on first publish) and
+`--provenance`. A staging run only `--dry-run`s, so a rehearsal can never
+occupy a real version. Upstream's OIDC trusted publishing was bound to the
+upstream repo and the `@colbymchenry` scope, so it could not be reused.
 
 `SHA256SUMS` is load-bearing rather than decorative: `install.sh` / `install.ps1`
 verify against it and refuse to install on a mismatch, so a release published

@@ -108,9 +108,9 @@ export async function runInstallerWithOptions(opts: RunInstallerOptions): Promis
   // means every one of them silently fails to start the server.
   //
   // Upstream globally installed the UPSTREAM package from the public registry
-  // here. In this fork that call would (a) fetch a different project's code
-  // over the one the user just installed, and (b) fail outright, since the fork
-  // publishes nothing to npm. It was also redundant: reaching this code means
+  // here. In this fork that call would fetch a different project's code over
+  // the one the user just installed (this fork publishes under its own name,
+  // `@bridgenext/codegraph`). It was also redundant: reaching this code means
   // the user is already running an installed `codegraph`. We therefore only
   // VERIFY (a pure PATH scan — no subprocess, no network) and point at the
   // fork's installer when the check fails. `subprocess-timeouts.test.ts` pins

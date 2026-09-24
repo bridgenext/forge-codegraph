@@ -24,7 +24,7 @@ repository.
 
 - **Telemetry is gone.** Upstream collected anonymous usage stats by default and sent them to an external endpoint. This build collects nothing and sends nothing — the code was removed, not switched off, and a test keeps it that way.
 - **No more e-mail prompt.** The installer no longer offers a marketing waitlist or sends your address anywhere.
-- **Install from Bridgenext.** `install.sh` / `install.ps1` and `codegraph upgrade` now use Bridgenext's repository and releases. Nothing is published to a public package registry.
+- **Install from Bridgenext.** The package is `@bridgenext/codegraph`, published under Bridgenext's own scope, and `install.sh` / `install.ps1` and `codegraph upgrade` use Bridgenext's own repository and releases.
 - **Downloads are verified.** The installer checks every downloaded build against the release checksum and refuses to install if it doesn't match.
 - **Your agent config keeps its file permissions.** Installing no longer makes a locked-down `~/.claude.json` readable by other users on the machine.
 - **Automated checks on every change.** Type check, build, full test suite, and a dependency security audit now run on every push and pull request.
@@ -33,7 +33,7 @@ repository.
 ### Breaking Changes
 
 - The `codegraph telemetry` command is removed — there is no telemetry to configure. `CODEGRAPH_TELEMETRY` is likewise ignored. `DO_NOT_TRACK=1` still works and now only affects the update check.
-- This fork is not on npm. `npm i -g @colbymchenry/codegraph` installs upstream, not this build — use the install script in the README instead. Embedding CodeGraph as a library means depending on the repository and building it.
+- This fork publishes under a different name. `npm i -g @colbymchenry/codegraph` installs upstream, not this build — install `@bridgenext/codegraph` instead, and depend on that name when embedding CodeGraph as a library.
 
 ### Security
 
@@ -43,7 +43,7 @@ repository.
 - Updated `picomatch` to clear two high-severity advisories in a shipped dependency (ReDoS, and incorrect glob matching via POSIX character classes).
 - The installer no longer runs `npm install -g` against a public registry mid-install.
 - `codegraph upgrade` on Windows now checks the build it downloads against the release checksum before installing it, and stops if they disagree. Previously only a fresh install was verified; an upgrade was not.
-- CodeGraph can no longer be installed or upgraded from a public package registry. Upgrading a copy that came from one is refused with a pointer to the verified installer, and the package is marked private so it cannot be published by accident.
+- The repository's own package manifest is marked private, so a stray `npm publish` from a checkout cannot ship the wrong contents under the `@bridgenext/codegraph` name. Releases are assembled and published only by the release workflow.
 
 ### Fixes
 

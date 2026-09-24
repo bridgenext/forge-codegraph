@@ -68,7 +68,7 @@ This is Bridgenext's fork of [colbymchenry/codegraph](https://github.com/colbymc
 |---|---|---|
 | **Telemetry** | Anonymous usage stats, **on by default**, POSTed to `telemetry.getcodegraph.com` | **Removed entirely.** Not a flag — the client, the ingest worker, and every call site are deleted, and a test fails the build if any of it returns. See [Telemetry](#telemetry). |
 | **E-mail signup** | Installer/upgrade offered a beta waitlist and POSTed your address to `getcodegraph.com` | Removed. |
-| **Distribution** | npm (`@colbymchenry/codegraph`) + GitHub Releases | **GitHub Releases from this repo only.** Nothing is published to a public registry. |
+| **Distribution** | npm (`@colbymchenry/codegraph`) + GitHub Releases | **npm (`@bridgenext/codegraph`) + GitHub Releases from this repo.** Published under the Bridgenext scope, so which build you have is never ambiguous. |
 | **Download integrity** | Release bundles downloaded and executed without verifying `SHA256SUMS` | `install.sh` / `install.ps1` verify the archive against the release's `SHA256SUMS` and **abort on a mismatch**. |
 | **Config file permissions** | Rewriting `~/.claude.json` reset it to the process umask (`0600` → `0644`) | The original file mode is preserved. This file holds MCP `env` blocks, which routinely contain API keys. |
 | **CI** | No automated checks on push/PR | Type check, build, the test suite (~3,000 tests), and a blocking production-dependency audit on every push and PR. |
@@ -79,7 +79,15 @@ Everything else — commands, MCP tools, config, behavior — is upstream's.
 
 ### 1. Install the CLI
 
-**No Node.js required** — one command grabs the right build for your OS from this repository's [Releases](https://github.com/bridgenext/forge-codegraph/releases):
+Install the package — **`@bridgenext/codegraph`**, published under the Bridgenext scope:
+
+```bash
+npm i -g @bridgenext/codegraph
+```
+
+<sub>The package bundles its own Node runtime: a tiny shim execs the bundled runtime rather than yours, so it behaves identically on any Node version. npm downloads only the build matching your OS and CPU.</sub>
+
+**No Node.js on the machine?** One command grabs the right build for your OS from this repository's [Releases](https://github.com/bridgenext/forge-codegraph/releases):
 
 ```bash
 # macOS / Linux
@@ -622,12 +630,10 @@ CodeGraph can be embedded directly — both `import` and `require` resolve the
 `CodeGraph` class in your own process, handy for embedding it in an app (e.g. an
 Electron main process).
 
-> **Fork note:** this fork publishes no npm package, so embedding means
-> depending on the repository directly — e.g. a git dependency
-> (`"@bridgenext/codegraph": "github:bridgenext/forge-codegraph#v1.6.0"`) plus a
-> `npm run build` in your install step, or vendoring the built `dist/`. If
-> Bridgenext later stands up an internal registry, `scripts/pack-npm.sh` already
-> produces the publishable package layout.
+> **Fork note:** depend on `@bridgenext/codegraph` (not upstream
+> `@colbymchenry/codegraph`). The published main package carries the type
+> declarations and re-exports the compiled library from the per-platform
+> bundle, so `import` and `require` both resolve without a build step.
 
 ```typescript
 import CodeGraph from '@bridgenext/codegraph';
@@ -804,8 +810,10 @@ carries cryptographic proof of it:
   gh attestation verify codegraph-darwin-arm64.tar.gz -R bridgenext/forge-codegraph
   ```
 
-This fork publishes nothing to npm, so there are no registry credentials to
-leak and no chance of an internal build reaching a public registry.
+Packages are published to npm only by the release workflow, with `--provenance`,
+so every published version carries a signed link back to the workflow run and
+commit that built it. The repository's own manifest is `private`, so a stray
+`npm publish` from a checkout cannot ship under the `@bridgenext/codegraph` name.
 
 ## Supported Platforms
 

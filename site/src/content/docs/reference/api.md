@@ -64,6 +64,6 @@ import {
 
 ## Embedding requirements
 
-- **Build from the repository** (`npm ci && npm run build`) so `dist/` — the compiled library — exists. This fork publishes no npm package; depend on it as a git dependency, e.g. `"@bridgenext/codegraph": "github:bridgenext/forge-codegraph#v1.6.0"`.
+- **Install the package** (`npm i @bridgenext/codegraph`). The published main package ships the type declarations and re-exports the compiled library from the per-platform bundle, so `import` and `require` resolve with no build step.
 - The API runs on **your** runtime, so it needs **Node 22.5+** for the built-in `node:sqlite` module (an Electron main process qualifies when its bundled Node is 22.5+). The CLI and MCP server are unaffected — they ship with a self-contained bundled runtime and need no Node at all.
 - TypeScript types ship with the package. Keep `@types/node` available and `skipLibCheck: true` (the common default).

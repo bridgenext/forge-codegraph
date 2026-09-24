@@ -640,30 +640,27 @@ export function npmInvocation(platform: NodeJS.Platform, npmArgs: string[]): { c
 
 function upgradeNpm(
   method: Extract<InstallMethod, { kind: 'npm' }>,
-  _versionSpec: string,
+  versionSpec: string,
   deps: UpgradeDeps
 ): number {
-  // This fork publishes nothing to npm (see BUNDLING.md), so
-  // `npm install -g @bridgenext/codegraph` cannot resolve to a Bridgenext
-  // build. Running it anyway would fetch whatever happens to occupy that name
-  // on the public registry — an unclaimed scope is a dependency-confusion
-  // vector, and an auto-upgrade is the worst place to hit one. Refuse, and
-  // point at the installer that verifies what it downloads.
-  deps.error('This copy was resolved from node_modules, but the Bridgenext fork is not published to any npm registry.');
+  const args = method.scope === 'global'
+    ? ['install', '-g', `${NPM_PACKAGE}@${versionSpec}`]
+    : ['install', `${NPM_PACKAGE}@${versionSpec}`];
+  deps.log(c.dim(`Running: npm ${args.join(' ')}`));
+  const inv = npmInvocation(deps.platform, args);
+  const code = deps.run(inv.cmd, inv.args, process.env);
+  if (code !== 0) {
+    deps.error(`npm exited with code ${code}.`);
+    if (method.scope === 'global') {
+      deps.log(c.dim('If this is a permissions error (EACCES), your global prefix needs sudo, or use a'));
+      deps.log(c.dim('Node version manager (nvm/fnm) so global installs don’t require root.'));
+    }
+    return 1;
+  }
   deps.log('');
-  deps.log('Reinstall with the verified installer instead:');
-  deps.log(
-    c.dim(
-      deps.platform === 'win32'
-        ? `  irm ${INSTALL_PS1_URL} | iex`
-        : `  curl -fsSL ${INSTALL_SH_URL} | sh`
-    )
-  );
-  deps.log('');
-  deps.log(
-    c.dim(`Then remove the npm copy: npm ${method.scope === 'global' ? 'uninstall -g' : 'uninstall'} ${NPM_PACKAGE}`)
-  );
-  return 1;
+  deps.log(c.green('✓ Upgrade complete.'));
+  deps.log(reindexAdvisory());
+  return 0;
 }
 
 // ---------------------------------------------------------------------------

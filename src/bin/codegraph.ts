@@ -67,10 +67,7 @@ async function loadCodeGraph(): Promise<typeof import('../index')> {
     console.error(`${red}${getGlyphs().err}${reset} Failed to load CodeGraph modules.`);
     console.error(`\n  Node: ${process.version}  Platform: ${process.platform} ${process.arch}`);
     console.error(`\n  Error: ${msg}`);
-    console.error(
-      '\n  Try reinstalling with: curl -fsSL https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/install.sh | sh\n' +
-        '  (Windows: irm https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/install.ps1 | iex)\n'
-    );
+    console.error('\n  Try reinstalling with: npm install -g @bridgenext/codegraph\n');
     process.exit(1);
   }
 }

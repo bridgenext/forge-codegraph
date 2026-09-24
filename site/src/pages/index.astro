@@ -9,10 +9,10 @@ import { getStarsLabel } from '../lib/github';
 
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 const repo = 'https://github.com/bridgenext/forge-codegraph';
-// This fork publishes nothing to npm — point "package" at the repo instead.
-const npm = 'https://github.com/bridgenext/forge-codegraph/releases';
+// The published package is @bridgenext/codegraph, under Bridgenext's own scope.
+const npm = 'https://www.npmjs.com/package/@bridgenext/codegraph';
 const stars = await getStarsLabel();
-const install = 'curl -fsSL https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/install.sh | sh';
+const install = 'npm i -g @bridgenext/codegraph';
 ---
 
 <!doctype html>

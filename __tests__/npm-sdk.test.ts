@@ -102,8 +102,6 @@ describe('npm-sdk programmatic entry', () => {
     expect(r.status).toBe(7);
     expect(r.stderr).toContain(`@bridgenext/codegraph-${target}`);
     expect(r.stderr).toContain('not installed');
-    expect(r.stderr).toContain('not published to any npm registry');
-    expect(r.stderr).toContain('install.sh');
-    expect(r.stderr).not.toContain('registry.npmjs.org');
+    expect(r.stderr).toContain('registry.npmjs.org');
   });
 });

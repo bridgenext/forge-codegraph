@@ -5,7 +5,15 @@ description: Install CodeGraph and configure your AI coding agents.
 
 ## 1. Install the CLI
 
-This is the Bridgenext fork, distributed from its own GitHub Releases — there is no npm package.
+This is the Bridgenext fork. The package is `@bridgenext/codegraph`, published under Bridgenext's own scope:
+
+```bash
+npm i -g @bridgenext/codegraph
+```
+
+It bundles its own Node runtime, and npm downloads only the build matching your OS and CPU.
+
+No Node.js on the machine? Use the standalone installer, which pulls the same build from this repository's Releases:
 
 ```bash
 # macOS / Linux

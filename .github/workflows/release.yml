@@ -163,7 +163,10 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 22
-          # No registry-url: this fork publishes nothing to npm.
+          # The published package is @bridgenext/codegraph. registry-url is what
+          # makes setup-node write an .npmrc that reads NODE_AUTH_TOKEN, so the
+          # publish step below can authenticate.
+          registry-url: 'https://registry.npmjs.org'
 
       - name: Resolve release mode
         id: mode
@@ -183,6 +186,7 @@ jobs:
           # secret out of the rendered command line, and lets us test only
           # whether it is SET without ever echoing it.
           RELEASE_PAT: ${{ secrets.RELEASE_PAT }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
           STAGING=true
@@ -200,6 +204,13 @@ jobs:
           # kernel + bundle build. Staging never pushes, so it is exempt.
           if [ "$STAGING" = "false" ] && [ -z "${RELEASE_PAT:-}" ]; then
             echo "::error::A production release needs the RELEASE_PAT secret (fine-grained, contents:write on this repo). Without it the CHANGELOG promote cannot push to ${{ github.event.repository.default_branch }}. Set it in Settings → Secrets and variables → Actions, or re-run as a staging build (push a v*-rc* tag, or tick 'prerelease')."
+            exit 1
+          fi
+          # Same reasoning for the npm channel: a production run publishes
+          # @bridgenext/codegraph, so a missing token is a fail-fast, not a
+          # surprise at the end of the build. Staging only dry-runs the pack.
+          if [ "$STAGING" = "false" ] && [ -z "${NPM_TOKEN:-}" ]; then
+            echo "::error::A production release needs the NPM_TOKEN secret (an npm automation token with publish rights on the @bridgenext scope) to publish @bridgenext/codegraph. Set it in Settings → Secrets and variables → Actions, or re-run as a staging build."
             exit 1
           fi
           if [ "$STAGING" = "true" ]; then
@@ -408,3 +419,64 @@ jobs:
               --title "$TAG" --notes-file notes.md $FLAGS
           fi
 
+      - name: Publish @bridgenext/codegraph to npm
+        # The package users install is @bridgenext/codegraph. It is NOT the
+        # repo's root package.json (which stays `private` so a stray
+        # `npm publish` at the root can never ship the wrong contents under the
+        # right name) — scripts/pack-npm.sh synthesizes the published manifests
+        # from the bundles built above:
+        #   @bridgenext/codegraph-<target>  one per platform, os/cpu tagged
+        #   @bridgenext/codegraph           the shim, with those in
+        #                                   optionalDependencies
+        # so npm downloads only the bundle matching the user's machine.
+        #
+        # Order matters: the per-platform packages must exist on the registry
+        # before the shim that depends on them, or a fresh install races a
+        # missing optional dependency.
+        #
+        # Runs AFTER the GitHub Release exists, because the shim's self-heal
+        # fallback fetches release assets when an optional dep is unavailable
+        # (a registry mirror that did not mirror the platform package).
+        #
+        # Staging only DRY-RUNS: a rehearsal must never occupy a real version
+        # on the public registry, since npm versions are immutable and cannot
+        # be meaningfully unpublished after 72h.
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          V="${{ steps.ver.outputs.version }}"
+          bash scripts/pack-npm.sh "$V"
+
+          STAGING="${{ steps.mode.outputs.staging }}"
+          if [ "$STAGING" = "true" ]; then
+            echo "::notice::STAGING - dry-running the npm publish, nothing is sent to the registry."
+          fi
+
+          publish_dir() {
+            dir="$1"
+            name="$(node -p "require('$PWD/$dir/package.json').name")"
+            if [ "$STAGING" = "true" ]; then
+              ( cd "$dir" && npm publish --dry-run --access public )
+              return 0
+            fi
+            # Idempotent: a re-run of an already-published version is a no-op
+            # rather than a hard EPUBLISHCONFLICT failure.
+            if npm view "$name@$V" version >/dev/null 2>&1; then
+              echo "::notice::$name@$V already on the registry - skipping."
+              return 0
+            fi
+            # --access public: a scoped package defaults to restricted on its
+            # first publish, which would make it un-installable for everyone.
+            # --provenance: signed link back to this workflow run; requires the
+            # synthesized `repository` field to match this repo, which
+            # pack-npm.sh sets.
+            ( cd "$dir" && npm publish --access public --provenance )
+            echo "::notice::published $name@$V"
+          }
+
+          for d in release/npm/codegraph-*; do
+            [ -d "$d" ] || continue
+            publish_dir "$d"
+          done
+          publish_dir release/npm/main

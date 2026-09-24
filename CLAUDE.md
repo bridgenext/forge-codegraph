@@ -9,7 +9,7 @@ CodeGraph is a local-first code intelligence library + CLI + MCP server. It pars
 **This is the Bridgenext fork ([bridgenext/forge-codegraph](https://github.com/bridgenext/forge-codegraph)), not upstream.** Two things differ from upstream and must not be reverted by a merge:
 
 1. **No telemetry.** Upstream's telemetry client, ingest worker, dashboard, and the installer's marketing e-mail signup are deleted — not flag-disabled. `__tests__/no-telemetry.test.ts` fails the build if any of it returns; see `docs/design/no-telemetry.md` for the full removal record and the allow-listed network hosts. When merging upstream, run that suite and delete whatever it flags rather than widening the allow-list.
-2. **Distribution is GitHub Releases only.** Nothing is published to npm. The package name is `@bridgenext/codegraph` and `src/upgrade/index.ts`'s `REPO` is `bridgenext/forge-codegraph`; `install.sh` / `install.ps1` download from this repo's releases and **verify the archive against `SHA256SUMS` before extracting**. `scripts/pack-npm.sh` is kept (already scoped to `@bridgenext`) in case an internal registry is added later, but no workflow runs it.
+2. **Distribution is npm + GitHub Releases, both under Bridgenext.** The published package is **`@bridgenext/codegraph`** (never upstream's `@colbymchenry/codegraph`), assembled by `scripts/pack-npm.sh` and published by the release workflow — per-platform packages first, then the shim that lists them as `optionalDependencies`. The repo's own root `package.json` stays `private: true`: it is never the published artifact, so this only stops a stray root `npm publish` shipping the wrong contents under the right name. `src/upgrade/index.ts`'s `REPO` is `bridgenext/forge-codegraph` — that is the **repo slug**, not a package name, and it legitimately appears in `repository` metadata (npm requires it to match for `--provenance`) and in release-asset URLs. `install.sh` / `install.ps1` download from this repo's releases and **verify the archive against `SHA256SUMS` before extracting**.
 
 Same binary serves as installer, indexer, and MCP server.
 
@@ -266,11 +266,15 @@ CHANGELOG change back to `main` so on-disk truth matches the published
 notes), then bundles a Node runtime per platform (`scripts/build-bundle.sh`)
 and publishes the GitHub Release with a `SHA256SUMS` manifest.
 
-**This fork publishes nothing to npm.** Upstream's publish steps used OIDC
-trusted publishing bound to the upstream repo + `@colbymchenry` scope, which
-cannot work here; they were removed rather than left to fail, which also
-removes any path by which an internal build reaches a public registry. Never
-run `npm publish` in this repo.
+**This fork publishes `@bridgenext/codegraph` to npm.** The release workflow
+runs `scripts/pack-npm.sh`, publishes the per-platform packages first, then the
+shim that lists them as `optionalDependencies` — with `--access public` and
+`--provenance`. It needs an `NPM_TOKEN` secret with publish rights on the
+`@bridgenext` scope; a production run fails fast without it, and a staging run
+only `--dry-run`s. Upstream's OIDC trusted publishing was bound to the upstream
+repo + `@colbymchenry` scope, so it could not be reused. **Never run
+`npm publish` by hand** — the root manifest is `private` precisely so a manual
+root publish cannot ship the wrong contents under the right name.
 
 **Claude does NOT bump the version unless explicitly asked.** The maintainer
 typically does it themselves — often by editing `package.json` directly via
