@@ -6,7 +6,7 @@ description: Use CodeGraph as a TypeScript library.
 CodeGraph ships a TypeScript API. The public surface is the `CodeGraph` class.
 
 ```typescript
-import CodeGraph from '@colbymchenry/codegraph';
+import CodeGraph from '@bridgenext/codegraph';
 
 const cg = await CodeGraph.init('/path/to/project');
 // Or open an existing index:
@@ -44,7 +44,7 @@ cg.close();
 | `watch()` / `unwatch()` | Start / stop the file watcher |
 | `close()` | Close the database connection |
 
-CommonJS works too — `const { CodeGraph } = require('@colbymchenry/codegraph');`.
+CommonJS works too — `const { CodeGraph } = require('@bridgenext/codegraph');`.
 
 ## Lower-level building blocks
 
@@ -59,11 +59,11 @@ import {
   initGrammars,
   loadGrammarsForLanguages,
   FileLock,
-} from '@colbymchenry/codegraph';
+} from '@bridgenext/codegraph';
 ```
 
 ## Embedding requirements
 
-- **Install from npm** (`npm i @colbymchenry/codegraph`) so the matching per-platform package — which carries the compiled library — is fetched alongside the shim.
+- **Install the package** (`npm i @bridgenext/codegraph`). The published main package ships the type declarations and re-exports the compiled library from the per-platform bundle, so `import` and `require` resolve with no build step.
 - The API runs on **your** runtime, so it needs **Node 22.5+** for the built-in `node:sqlite` module (an Electron main process qualifies when its bundled Node is 22.5+). The CLI and MCP server are unaffected — they ship with a self-contained bundled runtime and need no Node at all.
 - TypeScript types ship with the package. Keep `@types/node` available and `skipLibCheck: true` (the common default).

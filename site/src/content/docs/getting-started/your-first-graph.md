@@ -44,8 +44,8 @@ codegraph callees handleRequest      # what a function calls
 codegraph impact AuthMiddleware      # what a change would affect
 ```
 
-These four each accept `--json` for machine-readable output. See the full [CLI reference](/codegraph/reference/cli/).
+These four each accept `--json` for machine-readable output. See the full [CLI reference](/forge-codegraph/reference/cli/).
 
 ## Hand it to your agent
 
-With a `.codegraph/` directory present and an agent configured (see [Installation](/codegraph/getting-started/installation/)), your agent uses the [MCP tools](/codegraph/reference/mcp-server/) automatically — no extra step.
+With a `.codegraph/` directory present and an agent configured (see [Installation](/forge-codegraph/getting-started/installation/)), your agent uses the [MCP tools](/forge-codegraph/reference/mcp-server/) automatically — no extra step.

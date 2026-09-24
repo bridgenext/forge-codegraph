@@ -21,13 +21,30 @@ export default defineConfig({
     env: {
       CODEGRAPH_ALLOW_UNSAFE_NODE: '1',
       /**
-       * The suite spawns real CLI/MCP processes; without this they would write
-       * telemetry state into the contributor's real ~/.codegraph and count test
-       * tool calls as real usage. The telemetry unit tests are unaffected —
-       * they inject their own `env` via the Telemetry constructor.
+       * The suite spawns real CLI/MCP processes. This fork has no telemetry,
+       * but the background update check still reaches github.com — keep the
+       * suite fully offline and side-effect-free against the contributor's
+       * real ~/.codegraph.
        */
-      CODEGRAPH_TELEMETRY: '0',
+      DO_NOT_TRACK: '1',
     },
+    /**
+     * Vitest defaults to a 5s per-test timeout. That is far too tight for this
+     * suite: most tests build a real project on disk, index it with real
+     * tree-sitter parsing in worker threads, and query real SQLite. Under the
+     * parallel load of a full run — especially in a container or on a CI
+     * runner — individual tests routinely exceed 5s and fail with "Test timed
+     * out in 5000ms" even though nothing is wrong. Measured: a full Linux run
+     * produced 5 such failures at the default and 1 at 30s, in a different set
+     * of files each time, which is exactly the signature of a timeout that is
+     * too small rather than of broken code.
+     *
+     * Raising it does not hide failures — a genuinely hung test still fails,
+     * just later. It removes the noise that makes a real regression hard to
+     * see. Tests that need longer already pass an explicit per-test timeout.
+     */
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],

@@ -8,24 +8,83 @@ name: Release
 #      maintainer didn't pre-stage the [<version>] block by hand,
 #   3. builds a self-contained bundle for every platform (one runner — there's no
 #      native compilation, so cross-packaging is fine),
-#   4. creates the GitHub Release (tag v<version>) with all archives, using the
-#      release notes from CHANGELOG.md,
-#   5. publishes the npm thin-installer (shim + per-platform packages).
+#   4. creates the GitHub Release (tag v<version>) with all archives + a
+#      SHA256SUMS manifest, using the release notes from CHANGELOG.md.
 #
 # Before triggering: bump package.json. CHANGELOG.md entries can live under
 # `## [Unreleased]` — step 2 takes care of moving them.
 #
-# npm auth is OIDC trusted publishing (no NPM_TOKEN): every published package
-# (@colbymchenry/codegraph + the per-platform bundles) has this repo +
-# release.yml configured as its trusted publisher on npmjs.com. Adding a new
-# platform package means configuring its trusted publisher there before the
-# first release that includes it.
+# STAGING RUNS. A production release is irreversible in practice — teammates'
+# installers resolve `releases/latest` the moment it publishes — so there needs
+# to be a way to rehearse the whole path first. Two ways in:
+#
+#   - tick `prerelease` on a manual dispatch, or
+#   - push a tag matching `v*-rc*` (e.g. `v1.6.0-rc.1`), from ANY branch.
+#
+# The tag route is the one that works before a merge: `workflow_dispatch` is
+# only offered for workflows on the default branch, so a feature branch cannot
+# dispatch this at all — which is exactly when a rehearsal has value. "Resolve
+# release mode" below decides staging-vs-production ONCE and fails closed, so a
+# branch build cannot become a production release even by accident.
+#
+# A staging run changes three things, and nothing else:
+#   - the release is flagged pre-release, which GitHub excludes from BOTH the
+#     /releases/latest API and the releases/latest redirect. Those are the only
+#     two ways install.sh discovers a version, so a default install can never
+#     resolve to a staging build; you reach it deliberately with
+#     CODEGRAPH_VERSION=<tag>.
+#   - step 2 is skipped and no step pushes to main, so a rehearsal cannot
+#     consume the [Unreleased] block or move the branch. Notes come from
+#     [Unreleased] instead.
+#   - the tag comes from the `tag` input (e.g. v1.6.0-rc.1), so staging does
+#     not require bumping package.json on main.
+# Everything else — kernel matrix, bundle build, SHA256SUMS, attestation — runs
+# exactly as it does for a real release, which is the point: the parts that can
+# only fail in CI are the parts being rehearsed.
+#
+# BRIDGENEXT FORK — distribution is GitHub Releases ONLY. Upstream additionally
+# published an npm thin-installer under @colbymchenry using OIDC trusted
+# publishing, which cannot work here: trusted publishing is bound to the
+# upstream repo + workflow on npmjs.com, and this fork owns no npm scope. That
+# step is removed rather than left to fail — and removing it also removes the
+# risk of a misconfigured run publishing an internal build to a public
+# registry. Teammates install via install.sh / install.ps1 (see README).
+#
+# If Bridgenext later wants an npm channel, `scripts/pack-npm.sh` is still in
+# the tree and already scoped to @bridgenext — add a publish step plus the
+# registry credentials then.
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      prerelease:
+        description: 'Staging run: publish as a pre-release (hidden from releases/latest, no push to main)'
+        type: boolean
+        default: false
+      tag:
+        description: 'Release tag override, e.g. v1.6.0-rc.1 (default: v<package.json version>)'
+        type: string
+        default: ''
+  # Pushing an -rc tag builds a staging release from THAT tag's commit.
+  #
+  # This exists because `workflow_dispatch` is only offered for workflows on the
+  # default branch, so a release cannot be rehearsed from a feature branch
+  # before merging — which is precisely when rehearsing is worth anything. A
+  # `push` trigger has no such restriction: it runs the workflow file from the
+  # pushed ref, so an -rc tag on any branch works.
+  #
+  # Safe by construction rather than by discipline: the "Resolve release mode"
+  # step forces STAGING for every trigger except a workflow_dispatch from the
+  # default branch, so a tag push can only ever produce a pre-release — it
+  # cannot promote the CHANGELOG, cannot push to main, and cannot become
+  # `releases/latest`. The tag pattern excludes plain vX.Y.Z on purpose: a
+  # production tag must go through an explicit dispatch.
+  push:
+    tags:
+      - 'v*-rc*'
 
 permissions:
   contents: write      # create the GitHub Release + tag, push the CHANGELOG promote
-  id-token: write      # OIDC token for npm --provenance and Sigstore signing
+  id-token: write      # OIDC token for the build-provenance attestation
   attestations: write  # store the GitHub artifact attestations for the bundles
 
 jobs:
@@ -89,17 +148,76 @@ jobs:
           # RELEASE_PAT secret with: contents:write on this repo, no other
           # scopes. Rotate per your token policy; the workflow only runs
           # on manual dispatch so the blast radius is small.
-          token: ${{ secrets.RELEASE_PAT }}
+          #
+          # Falls back to the job's own GITHUB_TOKEN when the secret is unset.
+          # An unset secret interpolates to the EMPTY STRING, and checkout
+          # rejects that outright — "Input required and not supplied: token" —
+          # so without this fallback the job dies at step 2, before it can even
+          # report what is wrong. That is pure friction for a STAGING run,
+          # which pushes nothing and therefore never needs the elevated token:
+          # `contents: write` on the default GITHUB_TOKEN is enough to create
+          # the release. A production run genuinely does need the PAT, so the
+          # "Resolve release mode" step below fails it fast and explains why,
+          # rather than letting it build for 20 minutes and die at the push.
+          token: ${{ secrets.RELEASE_PAT || github.token }}
       - uses: actions/setup-node@v6
         with:
           node-version: 22
-          # No registry-url here: it writes an .npmrc that requires a
-          # NODE_AUTH_TOKEN env var to exist, and we publish via OIDC
-          # trusted publishing instead of a token.
+          # The published package is @bridgenext/codegraph. registry-url is what
+          # makes setup-node write an .npmrc that reads NODE_AUTH_TOKEN, so the
+          # publish step below can authenticate.
+          registry-url: 'https://registry.npmjs.org'
 
-      - name: Upgrade npm for OIDC trusted publishing
-        # Trusted publishing needs npm >= 11.5; Node 22 bundles npm 10.
-        run: npm install -g npm@11 && npm --version
+      - name: Resolve release mode
+        id: mode
+        # Single source of truth for "is this a rehearsal?", computed once and
+        # consumed by every step below, so the answer cannot differ between
+        # them. Fails CLOSED: staging unless a run proves it is the real thing,
+        # which is a workflow_dispatch, from the default branch, with
+        # `prerelease` unticked. Everything else — an -rc tag push, a dispatch
+        # from a feature branch — is forced to staging.
+        #
+        # This is what makes releasing from a branch safe: a branch build is
+        # structurally incapable of promoting the CHANGELOG, pushing to main,
+        # or becoming `releases/latest`. It does not depend on the operator
+        # remembering to tick a box.
+        env:
+          # Read as an env var, not interpolated into the script: keeps the
+          # secret out of the rendered command line, and lets us test only
+          # whether it is SET without ever echoing it.
+          RELEASE_PAT: ${{ secrets.RELEASE_PAT }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          STAGING=true
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] \
+             && [ "${{ github.ref }}" = "refs/heads/${{ github.event.repository.default_branch }}" ] \
+             && [ "${{ inputs.prerelease }}" != "true" ]; then
+            STAGING=false
+          fi
+          echo "staging=$STAGING" >> "$GITHUB_OUTPUT"
+
+          # A production run pushes the CHANGELOG promote (and possibly a
+          # lock-file sync) to the default branch, which needs the PAT to get
+          # past the branch ruleset. Checking here means the run fails in
+          # seconds with an actionable message instead of after the full
+          # kernel + bundle build. Staging never pushes, so it is exempt.
+          if [ "$STAGING" = "false" ] && [ -z "${RELEASE_PAT:-}" ]; then
+            echo "::error::A production release needs the RELEASE_PAT secret (fine-grained, contents:write on this repo). Without it the CHANGELOG promote cannot push to ${{ github.event.repository.default_branch }}. Set it in Settings → Secrets and variables → Actions, or re-run as a staging build (push a v*-rc* tag, or tick 'prerelease')."
+            exit 1
+          fi
+          # Same reasoning for the npm channel: a production run publishes
+          # @bridgenext/codegraph, so a missing token is a fail-fast, not a
+          # surprise at the end of the build. Staging only dry-runs the pack.
+          if [ "$STAGING" = "false" ] && [ -z "${NPM_TOKEN:-}" ]; then
+            echo "::error::A production release needs the NPM_TOKEN secret (an npm automation token with publish rights on the @bridgenext scope) to publish @bridgenext/codegraph. Set it in Settings → Secrets and variables → Actions, or re-run as a staging build."
+            exit 1
+          fi
+          if [ "$STAGING" = "true" ]; then
+            echo "::notice::STAGING run (event=${{ github.event_name }}, ref=${{ github.ref }}) — publishes a pre-release, does not touch ${{ github.event.repository.default_branch }}."
+          else
+            echo "::notice::PRODUCTION release from ${{ github.ref }}."
+          fi
 
       - name: Sync package-lock.json if version drifted
         # When the maintainer bumps the version on package.json only — for
@@ -135,7 +253,13 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add package-lock.json
           git commit -m "release: sync package-lock.json to ${PKG_V}" -m "[skip ci] Auto-generated by Release workflow."
-          git push origin "HEAD:${GITHUB_REF#refs/heads/}"
+          # The commit itself is needed either way (a dirty tree would break
+          # later steps), but a staging run must not move main — keep it local.
+          if [ "${{ steps.mode.outputs.staging }}" = "true" ]; then
+            echo "Staging run — lock-file sync kept local, not pushed."
+          else
+            git push origin "HEAD:${GITHUB_REF#refs/heads/}"
+          fi
 
       - run: npm ci
       - name: Ensure zip/unzip
@@ -145,7 +269,33 @@ jobs:
         id: ver
         run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
 
+      - name: Resolve release tag
+        id: tag
+        # Defaults to v<package.json version>; the `tag` input overrides it so a
+        # staging build can publish v1.6.0-rc.1 without bumping package.json on
+        # main. The leading `v` is normalized here because install.sh normalizes
+        # it too — `case "$version" in v*) ;; *) version="v$version" ;; esac` —
+        # so a tag published as bare `dev` is unreachable by the installer,
+        # which would look for `vdev` and 404 on download.
+        run: |
+          set -euo pipefail
+          # An -rc tag push already names the tag — use it verbatim rather than
+          # deriving a second, different one from package.json.
+          if [ "${{ github.event_name }}" = "push" ]; then
+            TAG="${{ github.ref_name }}"
+          else
+            TAG="${{ inputs.tag }}"
+            [ -n "$TAG" ] || TAG="v${{ steps.ver.outputs.version }}"
+          fi
+          case "$TAG" in v*) ;; *) TAG="v$TAG" ;; esac
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Release tag: $TAG (staging=${{ steps.mode.outputs.staging }})"
+
       - name: Promote [Unreleased] → [<version>] in CHANGELOG.md
+        # Skipped on a staging run: promoting would consume the [Unreleased]
+        # block and push to main, so a rehearsal would silently spend the notes
+        # meant for the real release.
+        if: ${{ steps.mode.outputs.staging != 'true' }}
         # Idempotent: a no-op if [Unreleased] is empty OR if the previous
         # run already moved everything. Auto-commit + push the change back
         # so the version block on main is the source of truth going
@@ -213,7 +363,7 @@ jobs:
         # was built by this workflow from this repo — SHA256SUMS alone only
         # proves integrity, not origin, since it ships next to the bundles.
         # Verify any downloaded artifact with:
-        #   gh attestation verify <file> -R colbymchenry/codegraph
+        #   gh attestation verify <file> -R bridgenext/forge-codegraph
         uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
@@ -226,11 +376,20 @@ jobs:
         # never be needed in practice. Kept for defense-in-depth.
         run: |
           V="${{ steps.ver.outputs.version }}"
-          node scripts/extract-release-notes.mjs "$V" > notes.md 2>/dev/null \
-            || node scripts/extract-release-notes.mjs Unreleased > notes.md 2>/dev/null || true
-          if [ ! -s notes.md ]; then
-            echo "::error::No release notes in CHANGELOG.md for [$V] or [Unreleased]."
-            exit 1
+          if [ "${{ steps.mode.outputs.staging }}" = "true" ]; then
+            # Staging: the promote step was skipped, so the pending notes are
+            # still under [Unreleased]. An empty block is fine here — a
+            # rehearsal is judged on the artifacts, not the prose — so unlike
+            # the real path this does not fail the run.
+            node scripts/extract-release-notes.mjs Unreleased > notes.md 2>/dev/null || true
+            [ -s notes.md ] || echo "Staging build ${{ steps.tag.outputs.tag }} — not a release." > notes.md
+          else
+            node scripts/extract-release-notes.mjs "$V" > notes.md 2>/dev/null \
+              || node scripts/extract-release-notes.mjs Unreleased > notes.md 2>/dev/null || true
+            if [ ! -s notes.md ]; then
+              echo "::error::No release notes in CHANGELOG.md for [$V] or [Unreleased]."
+              exit 1
+            fi
           fi
           echo "----- release notes -----"; cat notes.md
 
@@ -238,66 +397,86 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="v${{ steps.ver.outputs.version }}"
+          set -euo pipefail
+          TAG="${{ steps.tag.outputs.tag }}"
+          # `--prerelease` is what keeps a staging build out of the
+          # /releases/latest API and the releases/latest redirect — the only two
+          # paths install.sh uses to resolve a version when CODEGRAPH_VERSION is
+          # unset. Without it, a rehearsal would immediately become the version
+          # every teammate's installer picks up.
+          FLAGS=""
+          if [ "${{ steps.mode.outputs.staging }}" = "true" ]; then
+            FLAGS="--prerelease"
+          fi
           # Idempotent: create the release once, otherwise (re-run) refresh assets.
+          # Note the re-run branch only refreshes ASSETS — it will not flip an
+          # existing release's prerelease flag, so never reuse a production tag
+          # for a staging run.
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" release/codegraph-* release/SHA256SUMS --clobber
           else
-            gh release create "$TAG" release/codegraph-* release/SHA256SUMS --title "$TAG" --notes-file notes.md
+            gh release create "$TAG" release/codegraph-* release/SHA256SUMS \
+              --title "$TAG" --notes-file notes.md $FLAGS
           fi
 
-      - name: Publish to npm
-        # Auth is OIDC trusted publishing (id-token: write above) — npm mints
-        # a short-lived credential from the workflow's identity; there is no
-        # NPM_TOKEN. Provenance is generated automatically on this path; the
-        # explicit --provenance keeps the intent visible and fails loudly if
-        # OIDC is ever unavailable.
+      - name: Publish @bridgenext/codegraph to npm
+        # The package users install is @bridgenext/codegraph. It is NOT the
+        # repo's root package.json (which stays `private` so a stray
+        # `npm publish` at the root can never ship the wrong contents under the
+        # right name) — scripts/pack-npm.sh synthesizes the published manifests
+        # from the bundles built above:
+        #   @bridgenext/codegraph-<target>  one per platform, os/cpu tagged
+        #   @bridgenext/codegraph           the shim, with those in
+        #                                   optionalDependencies
+        # so npm downloads only the bundle matching the user's machine.
+        #
+        # Order matters: the per-platform packages must exist on the registry
+        # before the shim that depends on them, or a fresh install races a
+        # missing optional dependency.
+        #
+        # Runs AFTER the GitHub Release exists, because the shim's self-heal
+        # fallback fetches release assets when an optional dep is unavailable
+        # (a registry mirror that did not mirror the platform package).
+        #
+        # Staging only DRY-RUNS: a rehearsal must never occupy a real version
+        # on the public registry, since npm versions are immutable and cannot
+        # be meaningfully unpublished after 72h.
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
+          set -euo pipefail
           V="${{ steps.ver.outputs.version }}"
           bash scripts/pack-npm.sh "$V"
-          # Platform packages first, then the main shim (which depends on them).
-          # Skip any already on the registry so a re-run only fills in gaps.
-          for dir in release/npm/codegraph-* release/npm/main; do
-            name=$(node -p "require('./$dir/package.json').name")
-            if npm view "$name@$V" version >/dev/null 2>&1; then
-              echo "skip $name@$V (already published)"
-            else
-              echo "publishing $name@$V"
-              # --provenance: publish with an npm provenance attestation
-              # (needs the id-token: write permission above and the
-              # repository field pack-npm.sh writes into each package.json).
-              ( cd "$dir" && npm publish --access public --provenance )
+
+          STAGING="${{ steps.mode.outputs.staging }}"
+          if [ "$STAGING" = "true" ]; then
+            echo "::notice::STAGING - dry-running the npm publish, nothing is sent to the registry."
+          fi
+
+          publish_dir() {
+            dir="$1"
+            name="$(node -p "require('$PWD/$dir/package.json').name")"
+            if [ "$STAGING" = "true" ]; then
+              ( cd "$dir" && npm publish --dry-run --access public )
+              return 0
             fi
-          done
+            # Idempotent: a re-run of an already-published version is a no-op
+            # rather than a hard EPUBLISHCONFLICT failure.
+            if npm view "$name@$V" version >/dev/null 2>&1; then
+              echo "::notice::$name@$V already on the registry - skipping."
+              return 0
+            fi
+            # --access public: a scoped package defaults to restricted on its
+            # first publish, which would make it un-installable for everyone.
+            # --provenance: signed link back to this workflow run; requires the
+            # synthesized `repository` field to match this repo, which
+            # pack-npm.sh sets.
+            ( cd "$dir" && npm publish --access public --provenance )
+            echo "::notice::published $name@$V"
+          }
 
-      - name: Verify every package is actually on the registry
-        run: |
-          V="${{ steps.ver.outputs.version }}"
-          # npm publish can print success without persisting; confirm against the
-          # registry (with retries for propagation) so green means really shipped.
-          for dir in release/npm/codegraph-* release/npm/main; do
-            name=$(node -p "require('./$dir/package.json').name")
-            ok=
-            for i in 1 2 3 4 5 6; do
-              if npm view "$name@$V" version >/dev/null 2>&1; then ok=1; break; fi
-              echo "waiting for $name@$V to appear ($i)…"; sleep 10
-            done
-            [ -n "$ok" ] || { echo "::error::$name@$V never appeared on the registry"; exit 1; }
-            echo "verified $name@$V"
+          for d in release/npm/codegraph-*; do
+            [ -d "$d" ] || continue
+            publish_dir "$d"
           done
-
-      - name: Sync packages to npmmirror
-        # npmmirror/cnpm mirror lazily and frequently never pull the per-platform
-        # optionalDependencies on their own, so `npm i` there fails with
-        # "no prebuilt bundle" (issue #303). Nudge a sync now so mirror users get
-        # the bundle without waiting. Best-effort — the launcher also self-heals
-        # from GitHub Releases — so a mirror hiccup never fails the release.
-        continue-on-error: true
-        run: |
-          for dir in release/npm/codegraph-* release/npm/main; do
-            name=$(node -p "require('./$dir/package.json').name")
-            enc=$(node -p "encodeURIComponent(require('./$dir/package.json').name)")
-            echo "sync $name"
-            curl -s -X PUT "https://registry.npmmirror.com/-/package/$enc/syncs" || true
-            echo
-          done
+          publish_dir release/npm/main

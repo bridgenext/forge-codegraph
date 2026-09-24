@@ -32,7 +32,6 @@ function colorEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     CODEGRAPH_NO_DAEMON: '1',
-    CODEGRAPH_TELEMETRY: '0',
   };
   delete env.NO_COLOR;
   delete env.FORCE_COLOR;

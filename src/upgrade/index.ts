@@ -8,7 +8,7 @@
  *     canonical installer script (single source of truth) so the download /
  *     version-resolution / PATH logic never drifts between first-install and
  *     upgrade.
- *   - **npm** — installed via `npm i -g @colbymchenry/codegraph`. Upgrading
+ *   - **npm** — installed via `npm i -g @bridgenext/codegraph`. Upgrading
  *     shells out to npm.
  *   - **npx** — ephemeral; nothing to upgrade (next `npx` fetches latest).
  *   - **source** — a git checkout running its own `dist/`; `git pull` + rebuild.
@@ -30,10 +30,11 @@ import * as https from 'https';
 import { spawnSync } from 'child_process';
 import { ansiColorsEnabled } from '../ui/color';
 
-export const REPO = 'colbymchenry/codegraph';
-export const NPM_PACKAGE = '@colbymchenry/codegraph';
+export const REPO = 'bridgenext/forge-codegraph';
+export const NPM_PACKAGE = '@bridgenext/codegraph';
 const RAW_BASE = `https://raw.githubusercontent.com/${REPO}/main`;
 export const INSTALL_SH_URL = `${RAW_BASE}/install.sh`;
+export const INSTALL_PS1_URL = `${RAW_BASE}/install.ps1`;
 
 // ---------------------------------------------------------------------------
 // Install-method detection (pure — fully unit-testable via injected probes)
@@ -103,7 +104,7 @@ export function detectInstallMethod(input: DetectInput): InstallMethod {
   const norm = toPosix(input.filename);
 
   // Path-based checks come FIRST. The npm thin-installer's per-platform
-  // package (@colbymchenry/codegraph-<platform>-<arch>) is itself a complete
+  // package (@bridgenext/codegraph-<platform>-<arch>) is itself a complete
   // bundle — vendored node + bin/ launcher — living inside node_modules, so
   // the layout sniff below would misread every npm install as a standalone
   // bundle. `upgrade` would then curl install.sh into ~/.codegraph: a SECOND
@@ -112,7 +113,7 @@ export function detectInstallMethod(input: DetectInput): InstallMethod {
   // self-inflicted). A path under node_modules is authoritative about HOW the
   // user installed, whatever the artifact inside looks like.
 
-  // npx cache: <…>/_npx/<hash>/node_modules/@colbymchenry/codegraph/…
+  // npx cache: <…>/_npx/<hash>/node_modules/@bridgenext/codegraph/…
   // (checked before npm — the npx cache path also contains /node_modules/).
   if (norm.includes('/_npx/')) {
     return { kind: 'npx' };
@@ -297,13 +298,6 @@ export interface UpgradeDeps {
   warn: (msg: string) => void;
   error: (msg: string) => void;
   platform: NodeJS.Platform;
-  /**
-   * Offer the one-time CodeGraph Pro beta opt-in after a successful update
-   * (see installer/beta-signup — self-gating: TTY only, and silent forever
-   * once any install/upgrade ask was answered). Optional so unit tests and
-   * embedded callers stay prompt-free; never fatal to the upgrade.
-   */
-  offerBetaSignup?: () => Promise<void>;
 }
 
 // Colors off when piped / NO_COLOR / --no-color (#1281).
@@ -422,15 +416,6 @@ export async function runUpgrade(opts: UpgradeOptions, deps: UpgradeDeps): Promi
       }
     } else {
       deps.log(c.dim('Skipped refreshing agent instructions/config — run `codegraph install --refresh` once the PATH is fixed.'));
-    }
-    // Reached only after a real binary update (check/up-to-date/npx/source
-    // all returned earlier) — the one place the upgrade path may offer the
-    // beta opt-in. The hook self-gates on TTY + the stored once-per-machine
-    // choice, so an already-answered user never sees it again.
-    try {
-      await deps.offerBetaSignup?.();
-    } catch {
-      /* a marketing question must never fail the upgrade */
     }
   }
   return code;
@@ -591,6 +576,15 @@ export function buildWindowsUpgradeScript(bundleRoot: string, version: string, a
     `New-Item -ItemType Directory -Force -Path $tmp | Out-Null`,
     `$zip=Join-Path $tmp 'cg.zip'`,
     `Invoke-WebRequest -Uri $url -OutFile $zip`,
+    // Verify the archive against the release's SHA256SUMS BEFORE extracting it
+    // over the live install. Mirrors install.ps1's policy exactly: a mismatch
+    // is fatal, an absent/unlisted SHA256SUMS degrades to a warning, and
+    // CODEGRAPH_SKIP_CHECKSUM=1 bypasses. Until this existed, `codegraph
+    // upgrade` on Windows was the one download path with no integrity check --
+    // install.ps1 verified the bundle it fetched, this path did not.
+    `$asset='codegraph-${target}.zip'`,
+    `$sumsUrl='https://github.com/${REPO}/releases/download/${version}/SHA256SUMS'`,
+    `if($env:CODEGRAPH_SKIP_CHECKSUM -eq '1'){Write-Warning "Archive verification skipped (CODEGRAPH_SKIP_CHECKSUM=1)."}else{$sums=$null;try{$sums=(Invoke-WebRequest -Uri $sumsUrl -UseBasicParsing).Content}catch{$sums=$null};if(-not $sums){Write-Host "Note: no SHA256SUMS published for ${version}; skipping verification."}else{$expected=$null;foreach($line in ($sums -split "\`n")){$p=$line.Trim().Split([char[]]@(' ',"\`t"),[StringSplitOptions]::RemoveEmptyEntries);if($p.Length -ge 2 -and $p[0].Length -eq 64 -and [System.IO.Path]::GetFileName($p[1].TrimStart('*')) -eq $asset){$expected=$p[0].ToLower();break}};if(-not $expected){Write-Host "Note: $asset is not listed in SHA256SUMS; skipping verification."}else{$actual=(Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash.ToLower();if($actual -ne $expected){Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue;throw "codegraph: CHECKSUM MISMATCH for $asset (expected $($expected.Substring(0,12))..., got $($actual.Substring(0,12))...). Refusing to upgrade."};Write-Host "Verified SHA-256 checksum."}}}`,
     `$stage=Join-Path $tmp 'stage'`,
     `Expand-Archive -Path $zip -DestinationPath $stage -Force`,
     `$inner=Join-Path $stage 'codegraph-${target}'`,

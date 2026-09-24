@@ -7,7 +7,7 @@ Next to none — CodeGraph is **zero-config by default**, with nothing to write 
 
 ## What it skips out of the box
 
-- **Dependency, build, and cache directories** — `node_modules`, `vendor`, `dist`, `build`, `target`, `.venv`, `Pods`, `.next`, and the like across every [supported stack](/codegraph/reference/languages/) — so the graph is your code, not third-party noise. This holds even with no `.gitignore`.
+- **Dependency, build, and cache directories** — `node_modules`, `vendor`, `dist`, `build`, `target`, `.venv`, `Pods`, `.next`, and the like across every [supported stack](/forge-codegraph/reference/languages/) — so the graph is your code, not third-party noise. This holds even with no `.gitignore`.
 - **Anything in your `.gitignore`** — honored in git repos via git, and in non-git projects by reading `.gitignore` directly (root and nested).
 - **Files larger than 1 MB** — generated bundles, minified JS, vendored blobs.
 
@@ -55,7 +55,7 @@ Re-index (`codegraph index`) after adding or changing `include`.
 
 ## Custom file extensions
 
-If your project uses a non-standard extension for a [supported language](/codegraph/reference/languages/) — say `.dota_lua` for Lua, or `.tpl` for PHP — those files are skipped by default, because the extension isn't one CodeGraph recognizes. Map them with an optional `codegraph.json` at your project root:
+If your project uses a non-standard extension for a [supported language](/forge-codegraph/reference/languages/) — say `.dota_lua` for Lua, or `.tpl` for PHP — those files are skipped by default, because the extension isn't one CodeGraph recognizes. Map them with an optional `codegraph.json` at your project root:
 
 ```json
 {

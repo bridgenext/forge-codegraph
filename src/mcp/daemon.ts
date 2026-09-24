@@ -224,14 +224,45 @@ export class Daemon {
         }
         const server = net.createServer((socket) => this.handleConnection(socket));
         server.once('error', reject);
-        server.listen(socketPath, () => {
-          // POSIX: tighten permissions to user-only — the socket lives under
-          // `.codegraph/` (git-ignored, maybe a shared FS) or tmpdir.
-          if (process.platform !== 'win32') {
-            try { fs.chmodSync(socketPath, 0o600); } catch { /* best-effort */ }
+
+        // POSIX: the socket must be user-only. Anyone who can connect to it can
+        // issue MCP tool calls against this project's index — i.e. read source
+        // from the project root. chmod alone left a window: `listen()` creates
+        // the node with `0777 & ~umask` (0755 under the usual 022), so between
+        // bind and chmod any local user could connect. That window matters most
+        // for the tmpdir fallback candidate, which lives in a world-writable
+        // directory shared with every other user on the machine.
+        //
+        // Setting the umask across the bind makes the socket 0600 at CREATION,
+        // so the permissive state never exists. It is restored immediately —
+        // this runs during the detached daemon's sequential startup, before any
+        // other file-creating work, so the process-global umask is not in
+        // contention. The chmod stays as a belt-and-braces fixup for any
+        // platform where umask does not apply to AF_UNIX nodes.
+        const isPosix = process.platform !== 'win32';
+        const priorUmask = isPosix ? process.umask(0o177) : undefined;
+        const restoreUmask = (): void => {
+          if (priorUmask !== undefined) {
+            try { process.umask(priorUmask); } catch { /* best-effort */ }
           }
-          resolve(server);
-        });
+        };
+
+        server.once('error', restoreUmask);
+        try {
+          server.listen(socketPath, () => {
+            restoreUmask();
+            if (isPosix) {
+              try { fs.chmodSync(socketPath, 0o600); } catch { /* best-effort */ }
+            }
+            resolve(server);
+          });
+        } catch (err) {
+          // `listen` normally reports failures via the 'error' event, but a
+          // synchronous throw (bad path type) would otherwise leave the
+          // process umask clamped at 0177 for everything that follows.
+          restoreUmask();
+          reject(err);
+        }
       });
 
     let bound: { server: net.Server; socketPath: string };

@@ -1,0 +1,20 @@
+# Throwaway image for validating POSIX-only behavior from the Windows/macOS dev
+# box (see CLAUDE.md "Cross-platform validation"). Not shipped, not referenced
+# by CI — build it ad hoc:
+#
+#   docker build -f Dockerfile.test -t codegraph-test .
+#   docker run --rm --init codegraph-test npx vitest run <files>
+#
+# Node 24: older 22.x lines ship `node:sqlite` without FTS5, and the suite fails
+# wholesale with "no such module: fts5" on those.
+FROM node:24-bookworm
+
+WORKDIR /app
+# Copy manifests first so the dependency layer caches across source edits.
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY . .
+RUN npm run build
+
+CMD ["npm", "test"]

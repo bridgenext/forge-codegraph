@@ -39,30 +39,50 @@ on one Linux runner). Cross-compilation isn't a concern; only *run-testing* a
 bundle needs the target platform (or emulation, e.g. `docker run --platform
 linux/amd64`).
 
-## Install channels (all deliver the same bundle)
+## Install channels
+
+**Bridgenext fork: channels 1-3 are live.** npm is the primary channel; the
+standalone installers remain for machines with no Node — see "Release pipeline".
 
 1. **`curl | sh`** ([`install.sh`](install.sh)) — no Node required; ideal for a
    fresh Linux VPS over SSH. Detects os/arch, pulls the archive from GitHub
-   Releases, symlinks `codegraph` onto PATH. Re-run to upgrade; `--uninstall` to
-   remove.
-2. **npm** ([`scripts/npm-shim.js`](scripts/npm-shim.js)) — preserves
-   `npm i -g @colbymchenry/codegraph`. The main package is a tiny shim; the
-   bundles ship as per-platform `optionalDependencies`
-   (`@colbymchenry/codegraph-<target>` with `os`/`cpu`), so npm installs only the
-   matching one. The shim — run by the user's Node — execs the bundle, so the
-   real work runs on the bundled Node 24. Works even on old Node. On Windows it
-   invokes the bundled `node.exe` against the app entry directly (not the `.cmd`
-   launcher) — modern Node throws `EINVAL` when asked to spawn a `.cmd`/`.bat`.
-3. **Windows** ([`install.ps1`](install.ps1)) — `irm … | iex`; same flow as
-   install.sh (detect arch, pull the `.zip` from Releases, add to PATH).
+   Releases, **verifies it against the release's `SHA256SUMS` and aborts on a
+   mismatch**, then symlinks `codegraph` onto PATH. Re-run to upgrade;
+   `--uninstall` to remove.
+2. **Windows** ([`install.ps1`](install.ps1)) — `irm … | iex`; same flow as
+   install.sh (detect arch, pull the `.zip` from Releases, verify the checksum,
+   add to PATH).
+3. **npm — the primary channel.** ([`scripts/npm-shim.js`](scripts/npm-shim.js))
+   `npm i -g @bridgenext/codegraph`. Scoped to `@bridgenext/codegraph`: the main
+   package is a tiny shim and the bundles ship as per-platform
+   `optionalDependencies` (`@bridgenext/codegraph-<target>` with `os`/`cpu`), so
+   npm installs only the matching one. The shim — run by the user's Node —
+   execs the bundle, so the real work runs on the bundled Node 24, even on old
+   Node. On Windows it invokes the bundled `node.exe` against the app entry
+   directly (not the `.cmd` launcher) — modern Node throws `EINVAL` when asked
+   to spawn a `.cmd`/`.bat`. `scripts/pack-npm.sh` assembles the publishable
+   layout and the release workflow publishes it.
 4. **Homebrew / Scoop** — TODO (tap + cask pointing at the Release archives).
 
 ## Release pipeline
 
 [`.github/workflows/release.yml`](.github/workflows/release.yml) — manually
 triggered. Reads the version from `package.json`, builds every platform bundle on
-one runner, creates the GitHub Release (notes from `CHANGELOG.md`), and publishes
-the npm shim + per-platform packages. Requires the `NPM_TOKEN` repo secret.
+one runner, generates `SHA256SUMS`, attests build provenance, and creates the
+GitHub Release (notes from `CHANGELOG.md`).
+
+**npm publish.** The workflow runs `scripts/pack-npm.sh` and publishes the
+per-platform packages first, then the `@bridgenext/codegraph` shim that lists
+them as `optionalDependencies`. Needs an `NPM_TOKEN` secret with publish rights
+on the `@bridgenext` scope; a production run fails fast without it. Publishes
+with `--access public` (a scoped package is restricted on first publish) and
+`--provenance`. A staging run only `--dry-run`s, so a rehearsal can never
+occupy a real version. Upstream's OIDC trusted publishing was bound to the
+upstream repo and the `@colbymchenry` scope, so it could not be reused.
+
+`SHA256SUMS` is load-bearing rather than decorative: `install.sh` / `install.ps1`
+verify against it and refuse to install on a mismatch, so a release published
+without it silently downgrades every install to unverified.
 
 Still TODO:
 - **Code signing** — the main gap for "download & run": macOS Gatekeeper needs a

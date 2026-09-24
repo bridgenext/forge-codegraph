@@ -1,23 +1,28 @@
 #!/bin/sh
 #
-# CodeGraph standalone installer.
+# CodeGraph standalone installer (Bridgenext fork).
 #
 # Downloads a self-contained bundle (a vendored Node runtime + the app) from
 # GitHub Releases. No Node.js, no build tools, no npm required — ideal for a
 # fresh Linux VPS over SSH.
 #
-#   curl -fsSL https://raw.githubusercontent.com/colbymchenry/codegraph/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/install.sh | sh
 #
 # Upgrade:   run `codegraph upgrade` (or just re-run the same command).
 # Uninstall: curl -fsSL .../install.sh | sh -s -- --uninstall
 #
+# Every downloaded archive is verified against the release's SHA256SUMS before
+# it is extracted; a mismatch aborts the install. Set CODEGRAPH_SKIP_CHECKSUM=1
+# only for a release that predates SHA256SUMS.
+#
 # Environment:
-#   CODEGRAPH_VERSION      release tag to install (default: latest)
-#   CODEGRAPH_INSTALL_DIR  bundle location   (default: ~/.codegraph)
-#   CODEGRAPH_BIN_DIR      symlink location  (default: ~/.local/bin)
+#   CODEGRAPH_VERSION        release tag to install (default: latest)
+#   CODEGRAPH_INSTALL_DIR    bundle location   (default: ~/.codegraph)
+#   CODEGRAPH_BIN_DIR        symlink location  (default: ~/.local/bin)
+#   CODEGRAPH_SKIP_CHECKSUM  set to 1 to skip archive verification (discouraged)
 set -eu
 
-REPO="colbymchenry/codegraph"
+REPO="bridgenext/forge-codegraph"
 INSTALL_DIR="${CODEGRAPH_INSTALL_DIR:-$HOME/.codegraph}"
 BIN_DIR="${CODEGRAPH_BIN_DIR:-$HOME/.local/bin}"
 
@@ -70,6 +75,57 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 curl -fsSL "$url" -o "$tmp/cg.tar.gz" || { echo "codegraph: download failed: $url" >&2; exit 1; }
 
+# 3b. Verify the archive against the release's SHA256SUMS before extracting it.
+#
+# TLS authenticates the connection to GitHub, but nothing here previously
+# authenticated the BYTES: a corrupted download, a caching proxy, an artifact
+# swapped on a mirror, or a compromised release asset would all be extracted
+# and executed unnoticed. SHA256SUMS is published as a release asset by the
+# same workflow that builds the bundles, so checking against it turns a silent
+# tamper into a hard failure. The marker comments below let a unit test run
+# this exact block.
+# >>> CODEGRAPH_VERIFY_CHECKSUM
+verify_checksum() {
+  archive="$1"; asset="$2"; sums="$3"
+  # Pull this asset's line out of SHA256SUMS. Entries are "<hash>  <name>",
+  # with an optional leading '*' on the name for binary mode.
+  expected="$(sed -n "s#^\([0-9a-fA-F]\{64\}\)[[:space:]][[:space:]]*\*\{0,1\}${asset}\$#\1#p" "$sums" | head -n1)"
+  [ -n "$expected" ] || return 2   # asset not listed
+  if command -v sha256sum >/dev/null 2>&1; then
+    actual="$(sha256sum "$archive" | cut -d' ' -f1)"
+  elif command -v shasum >/dev/null 2>&1; then
+    actual="$(shasum -a 256 "$archive" | cut -d' ' -f1)"
+  else
+    return 3                        # no hashing tool available
+  fi
+  # Lowercase both sides; `tr` is in every POSIX base system.
+  expected="$(printf '%s' "$expected" | tr 'A-F' 'a-f')"
+  actual="$(printf '%s' "$actual" | tr 'A-F' 'a-f')"
+  [ "$expected" = "$actual" ] || return 1
+  return 0
+}
+
+if [ "${CODEGRAPH_SKIP_CHECKSUM:-}" = "1" ]; then
+  echo "codegraph: WARNING — archive verification skipped (CODEGRAPH_SKIP_CHECKSUM=1)." >&2
+elif curl -fsSL "https://github.com/$REPO/releases/download/$version/SHA256SUMS" -o "$tmp/SHA256SUMS" 2>/dev/null; then
+  set +e
+  verify_checksum "$tmp/cg.tar.gz" "codegraph-${target}.tar.gz" "$tmp/SHA256SUMS"
+  rc=$?
+  set -e
+  case "$rc" in
+    0) echo "Verified   SHA-256 checksum" ;;
+    1) echo "codegraph: CHECKSUM MISMATCH for codegraph-${target}.tar.gz — refusing to install." >&2
+       echo "codegraph: the download was corrupted or tampered with. Retry; if it persists, report it." >&2
+       exit 1 ;;
+    2) echo "codegraph: note — codegraph-${target}.tar.gz is not listed in SHA256SUMS; skipping verification." >&2 ;;
+    3) echo "codegraph: note — neither sha256sum nor shasum found; skipping verification." >&2 ;;
+  esac
+else
+  # Releases published before SHA256SUMS existed, or a transient fetch failure.
+  echo "codegraph: note — no SHA256SUMS published for $version; skipping verification." >&2
+fi
+# <<< CODEGRAPH_VERIFY_CHECKSUM
+
 dest="$INSTALL_DIR/versions/$version"
 rm -rf "$dest"
 mkdir -p "$dest"
@@ -113,7 +169,8 @@ fi
 # 6. PATH sanity. Two ways this install can fail to be the codegraph that runs:
 #   1. $BIN_DIR isn't on PATH at all.
 #   2. A *different* codegraph sits earlier on PATH and shadows ours — most
-#      often a stale `npm i -g @colbymchenry/codegraph`, whose launcher keeps
+#      often a stale npm-global CodeGraph (this fork's, or upstream
+#      @colbymchenry/codegraph), whose launcher keeps
 #      running its own version-pinned bundle, so `codegraph --version` disagrees
 #      with what we just installed (issue #1071).
 # Walk PATH once: note whether $BIN_DIR is present and which codegraph wins.
@@ -139,7 +196,7 @@ elif [ -n "$winner" ] && [ "$winner" != "$BIN_DIR/codegraph" ]; then
   echo "  $winner"
   echo "  (this install: $BIN_DIR/codegraph)"
   echo "If 'codegraph --version' shows an unexpected version, remove the other copy"
-  echo "(e.g. 'npm rm -g @colbymchenry/codegraph') or put $BIN_DIR first on PATH."
+  echo "(e.g. 'npm rm -g @bridgenext/codegraph') or put $BIN_DIR first on PATH."
 fi
 
 echo ""

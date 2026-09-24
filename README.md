@@ -1,26 +1,23 @@
 <div align="center">
 
-# CodeGraph
+# CodeGraph — Bridgenext fork
 
 Already installed? Run `codegraph upgrade`
 
-Follow [@getcodegraph](https://x.com/getcodegraph) on X for updates.
+**Internal Bridgenext fork of [CodeGraph](https://github.com/colbymchenry/codegraph): all telemetry removed, and installs point at this repository.** See [Telemetry](#telemetry) and [What differs from upstream](#what-differs-from-upstream).
 
 ### Supercharge Claude Code, Cursor, Codex, OpenCode, Hermes Agent, Gemini, Antigravity, Kiro, and GitHub Copilot with Semantic Code Intelligence
 
 **The fastest complete code graph · surgical context · built for how agents actually work · 100% local**
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/colbymchenry/codegraph/main/assets/rust-logo-dark.svg?v=1">
-  <img src="https://raw.githubusercontent.com/colbymchenry/codegraph/main/assets/rust-logo.svg?v=1" height="30" alt="Rust" align="center">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/assets/rust-logo-dark.svg?v=1">
+  <img src="https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/assets/rust-logo.svg?v=1" height="30" alt="Rust" align="center">
 </picture>&nbsp; **Kernel powered by Rust**
 
-### [Documentation & Website →](https://colbymchenry.github.io/codegraph/)
-
-[![npm version](https://img.shields.io/npm/v/@colbymchenry/codegraph.svg)](https://www.npmjs.com/package/@colbymchenry/codegraph)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Self-contained](https://img.shields.io/badge/Node.js-bundled%20%C2%B7%20none%20required-brightgreen.svg)](https://nodejs.org/)
-[![npm provenance](https://img.shields.io/badge/npm-provenance-brightgreen.svg)](#verified-releases)
+[![No telemetry](https://img.shields.io/badge/telemetry-none-brightgreen.svg)](#telemetry)
 [![Attested builds](https://img.shields.io/badge/releases-signed%20%26%20attested-brightgreen.svg)](#verified-releases)
 
 [![Windows](https://img.shields.io/badge/Windows-supported-blue.svg)](#supported-platforms)
@@ -37,18 +34,11 @@ Follow [@getcodegraph](https://x.com/getcodegraph) on X for updates.
 [![Kiro](https://img.shields.io/badge/Kiro-supported-blueviolet.svg)](#supported-agents)
 [![GitHub Copilot](https://img.shields.io/badge/GitHub_Copilot-supported-blueviolet.svg)](#supported-agents)
 
-<br>
-
-**The CodeGraph platform is coming** — for every PR, know exactly what to test, what could break, which flows are affected, and whether business logic is compromised.
-
-<a href="https://getcodegraph.com"><img alt="Join the waitlist for early beta access" src="https://raw.githubusercontent.com/colbymchenry/codegraph/main/assets/waitlist.svg?v=2" height="52"></a>
-
-<sub>Get <b>early beta access</b> to the hosted product · <a href="https://getcodegraph.com">getcodegraph.com</a></sub>
-
 </div>
 
 ## Contents
 
+- [What differs from upstream](#what-differs-from-upstream)
 - [Get Started](#get-started)
 - [Language Support](#language-support)
 - [Why CodeGraph?](#why-codegraph)
@@ -70,30 +60,66 @@ Follow [@getcodegraph](https://x.com/getcodegraph) on X for updates.
 - [Troubleshooting](#troubleshooting)
 - [License](#license)
 
+## What differs from upstream
+
+This is Bridgenext's fork of [colbymchenry/codegraph](https://github.com/colbymchenry/codegraph). The code intelligence — parsing, the graph, the MCP tools, every supported language — is unchanged. What differs:
+
+| | Upstream | This fork |
+|---|---|---|
+| **Telemetry** | Anonymous usage stats, **on by default**, POSTed to `telemetry.getcodegraph.com` | **Removed entirely.** Not a flag — the client, the ingest worker, and every call site are deleted, and a test fails the build if any of it returns. See [Telemetry](#telemetry). |
+| **E-mail signup** | Installer/upgrade offered a beta waitlist and POSTed your address to `getcodegraph.com` | Removed. |
+| **Distribution** | npm (`@colbymchenry/codegraph`) + GitHub Releases | **npm (`@bridgenext/codegraph`) + GitHub Releases from this repo.** Published under the Bridgenext scope, so which build you have is never ambiguous. |
+| **Download integrity** | Release bundles downloaded and executed without verifying `SHA256SUMS` | `install.sh` / `install.ps1` verify the archive against the release's `SHA256SUMS` and **abort on a mismatch**. |
+| **Config file permissions** | Rewriting `~/.claude.json` reset it to the process umask (`0600` → `0644`) | The original file mode is preserved. This file holds MCP `env` blocks, which routinely contain API keys. |
+| **CI** | No automated checks on push/PR | Type check, build, the test suite (~3,000 tests), and a blocking production-dependency audit on every push and PR. |
+
+Everything else — commands, MCP tools, config, behavior — is upstream's.
+
 ## Get Started
 
 ### 1. Install the CLI
 
-**No Node.js required** — one command grabs the right build for your OS:
+Install the package — **`@bridgenext/codegraph`**, published under the Bridgenext scope:
+
+```bash
+npm i -g @bridgenext/codegraph
+```
+
+<sub>The package bundles its own Node runtime: a tiny shim execs the bundled runtime rather than yours, so it behaves identically on any Node version. npm downloads only the build matching your OS and CPU.</sub>
+
+**No Node.js on the machine?** One command grabs the right build for your OS from this repository's [Releases](https://github.com/bridgenext/forge-codegraph/releases):
 
 ```bash
 # macOS / Linux
-curl -fsSL https://raw.githubusercontent.com/colbymchenry/codegraph/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/install.sh | sh
 
 # Windows (PowerShell)
-irm https://raw.githubusercontent.com/colbymchenry/codegraph/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/install.ps1 | iex
 ```
 
-<details>
-<summary><b>Already have Node? Use npm instead (works on any version)</b></summary>
-
-```bash
-npm i -g @colbymchenry/codegraph
-```
+<sub>The installer verifies the downloaded archive against the release's `SHA256SUMS` before extracting it, and refuses to install on a mismatch.</sub>
 
 <sub>CodeGraph bundles its own runtime — nothing to compile, no native build, works the same everywhere. The installer puts `codegraph` on your PATH but **doesn't change your current shell** — open a new terminal before the next step so the command resolves.</sub>
 
-<sub>**Upgrade any time** with `codegraph upgrade` — it detects how you installed (bundle, npm, or npx) and updates in place. Add `--check` to see if an update is available, or `codegraph upgrade <version>` to pin one.</sub>
+<sub>**Upgrade any time** with `codegraph upgrade` — it re-runs this installer in place. Add `--check` to see if an update is available, or `codegraph upgrade <version>` to pin one.</sub>
+
+<details>
+<summary><b>Already have an upstream CodeGraph installed?</b></summary>
+
+Remove it first, or its launcher may win the PATH race and keep serving the upstream build:
+
+```bash
+npm rm -g @colbymchenry/codegraph          # if you installed it via npm
+codegraph uninstall                         # or use its own uninstaller
+```
+
+Then run the install one-liner above. `codegraph install` self-heals stale config that a previous upstream install left in your agent's settings.
+
+Upstream's telemetry state files are inert in this build — nothing reads or sends them. Delete them if you want the disk clean:
+
+```bash
+rm -f ~/.codegraph/telemetry.json ~/.codegraph/telemetry-queue*.jsonl ~/.codegraph/beta-signup.json
+```
 
 </details>
 
@@ -105,7 +131,28 @@ In a **new terminal**, run the installer to connect CodeGraph to the agents you 
 codegraph install
 ```
 
-<sub>Detects and auto-configures Claude Code, Cursor, Codex CLI, opencode, Hermes Agent, Gemini CLI, Antigravity IDE, Kiro, and GitHub Copilot (VS Code, Copilot CLI, JetBrains IDEs) — wiring the CodeGraph MCP server into each. **This is the step that connects CodeGraph to your agent;** installing the CLI in step 1 does not do it on its own. It only wires up your agent — it does **not** index any code; building each project's graph is the separate `codegraph init` in step 3. (Shortcut: `npx @colbymchenry/codegraph` downloads and runs this in one go.)</sub>
+To wire up **Claude Code specifically** (the agent this fork is validated against):
+
+```bash
+codegraph install --target=claude
+```
+
+<sub>Detects and auto-configures Claude Code, Cursor, Codex CLI, opencode, Hermes Agent, Gemini CLI, Antigravity IDE, Kiro, and GitHub Copilot (VS Code, Copilot CLI, JetBrains IDEs) — wiring the CodeGraph MCP server into each. **This is the step that connects CodeGraph to your agent;** installing the CLI in step 1 does not do it on its own. It only wires up your agent — it does **not** index any code; building each project's graph is the separate `codegraph init` in step 3.</sub>
+
+<details>
+<summary><b>What `--target=claude` writes</b></summary>
+
+| Scope | File | What goes in it |
+|---|---|---|
+| global | `~/.claude.json` | The `mcpServers.codegraph` entry (`codegraph serve --mcp`) |
+| local | `./.mcp.json` | Same, project-scoped — this is the only project-level MCP file Claude Code reads |
+| both | `<scope>/.claude/settings.json` | `mcp__codegraph__*` in `permissions.allow`, so tool calls don't prompt (skip with `--no-auto-allow`) |
+| both | `<scope>/.claude/settings.json` | A `UserPromptSubmit` hook running `codegraph prompt-hook`, which front-loads graph context on structural prompts (opt-out at the prompt, or `CODEGRAPH_NO_PROMPT_HOOK=1`) |
+| both | `<scope>/.claude/CLAUDE.md` | A marker-fenced CodeGraph block, so Task-tool subagents see the tool guidance too |
+
+`--location=global` (default) or `--location=local` picks the scope. `codegraph install --print-config claude` prints the MCP snippet without touching disk, and `codegraph uninstall --target=claude` reverses every one of the writes above.
+
+</details>
 
 ### 3. Initialize each project
 
@@ -145,40 +192,40 @@ Pass `--keep-cli` to remove only the agent configurations and keep the CLI insta
 Every language below gets the same treatment — full structural extraction and cross-file resolution into one graph, no per-language setup:
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/colbymchenry/codegraph/main/assets/languages/typescript.svg?v=1" width="104" height="104" alt="TypeScript" />
-  <img src="https://raw.githubusercontent.com/colbymchenry/codegraph/main/assets/languages/javascript.svg?v=1" width="104" height="104" alt="JavaScript" />
-  <img src="https://raw.githubusercontent.com/colbymchenry/codegraph/main/assets/languages/arkts.svg?v=1" width="104" height="104" alt="ArkTS" />
-  <img src="https://raw.githubusercontent.com/colbymchenry/codegraph/main/assets/languages/python.svg?v=1" width="104" height="104" alt="Python" />
-  <img src="https://raw.githubusercontent.com/colbymchenry/codegraph/main/assets/languages/go.svg?v=1" width="104" height="104" alt="Go" />
-  <img src="https://raw.githubusercontent.com/colbymchenry/codegraph/main/assets/languages/rust.svg?v=1" width="104" height="104" alt="Rust" />
-  <img src="https://raw.githubusercontent.com/colbymchenry/codegraph/main/assets/languages/java.svg?v=1" width="104" height="104" alt="Java" />
-  <img src="https://raw.githubusercontent.com/colbymchenry/codegraph/main/assets/languages/csharp.svg?v=1" width="104" height="104" alt="C#" />
-  <img src="https://raw.githubusercontent.com/colbymchenry/codegraph/main/assets/languages/php.svg?v=1" width="104" height="104" alt="PHP" />
-  <img src="https://raw.githubusercontent.com/colbymchenry/codegraph/main/assets/languages/ruby.svg?v=1" width="104" height="104" alt="Ruby" />
-  <img src="https://raw.githubusercontent.com/colbymchenry/codegraph/main/assets/languages/c.svg?v=1" width="104" height="104" alt="C" />
-  <img src="https://raw.githubusercontent.com/colbymchenry/codegraph/main/assets/languages/cpp.svg?v=1" width="104" height="104" alt="C++" />
-  <img src="https://raw.githubusercontent.com/colbymchenry/codegraph/main/assets/languages/objective-c.svg?v=1" width="104" height="104" alt="Objective-C" />
-  <img src="https://raw.githubusercontent.com/colbymchenry/codegraph/main/assets/languages/metal.svg?v=1" width="104" height="104" alt="Metal" />
-  <img src="https://raw.githubusercontent.com/colbymchenry/codegraph/main/assets/languages/cuda.svg?v=1" width="104" height="104" alt="CUDA" />
-  <img src="https://raw.githubusercontent.com/colbymchenry/codegraph/main/assets/languages/swift.svg?v=1" width="104" height="104" alt="Swift" />
-  <img src="https://raw.githubusercontent.com/colbymchenry/codegraph/main/assets/languages/kotlin.svg?v=1" width="104" height="104" alt="Kotlin" />
-  <img src="https://raw.githubusercontent.com/colbymchenry/codegraph/main/assets/languages/scala.svg?v=1" width="104" height="104" alt="Scala" />
-  <img src="https://raw.githubusercontent.com/colbymchenry/codegraph/main/assets/languages/dart.svg?v=1" width="104" height="104" alt="Dart" />
-  <img src="https://raw.githubusercontent.com/colbymchenry/codegraph/main/assets/languages/svelte.svg?v=1" width="104" height="104" alt="Svelte" />
-  <img src="https://raw.githubusercontent.com/colbymchenry/codegraph/main/assets/languages/vue.svg?v=1" width="104" height="104" alt="Vue" />
-  <img src="https://raw.githubusercontent.com/colbymchenry/codegraph/main/assets/languages/astro.svg?v=1" width="104" height="104" alt="Astro" />
-  <img src="https://raw.githubusercontent.com/colbymchenry/codegraph/main/assets/languages/liquid.svg?v=1" width="104" height="104" alt="Liquid" />
-  <img src="https://raw.githubusercontent.com/colbymchenry/codegraph/main/assets/languages/delphi.svg?v=1" width="104" height="104" alt="Pascal / Delphi" />
-  <img src="https://raw.githubusercontent.com/colbymchenry/codegraph/main/assets/languages/lua.svg?v=1" width="104" height="104" alt="Lua" />
-  <img src="https://raw.githubusercontent.com/colbymchenry/codegraph/main/assets/languages/r.svg?v=1" width="104" height="104" alt="R" />
-  <img src="https://raw.githubusercontent.com/colbymchenry/codegraph/main/assets/languages/luau.svg?v=1" width="104" height="104" alt="Luau" />
-  <img src="https://raw.githubusercontent.com/colbymchenry/codegraph/main/assets/languages/cfml.svg?v=1" width="104" height="104" alt="CFML" />
-  <img src="https://raw.githubusercontent.com/colbymchenry/codegraph/main/assets/languages/cobol.svg?v=1" width="104" height="104" alt="COBOL" />
-  <img src="https://raw.githubusercontent.com/colbymchenry/codegraph/main/assets/languages/vbnet.svg?v=1" width="104" height="104" alt="Visual Basic .NET" />
-  <img src="https://raw.githubusercontent.com/colbymchenry/codegraph/main/assets/languages/erlang.svg?v=1" width="104" height="104" alt="Erlang" />
-  <img src="https://raw.githubusercontent.com/colbymchenry/codegraph/main/assets/languages/solidity.svg?v=1" width="104" height="104" alt="Solidity" />
-  <img src="https://raw.githubusercontent.com/colbymchenry/codegraph/main/assets/languages/terraform.svg?v=1" width="104" height="104" alt="Terraform / OpenTofu" />
-  <img src="https://raw.githubusercontent.com/colbymchenry/codegraph/main/assets/languages/nix.svg?v=1" width="104" height="104" alt="Nix" />
+  <img src="https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/assets/languages/typescript.svg?v=1" width="104" height="104" alt="TypeScript" />
+  <img src="https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/assets/languages/javascript.svg?v=1" width="104" height="104" alt="JavaScript" />
+  <img src="https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/assets/languages/arkts.svg?v=1" width="104" height="104" alt="ArkTS" />
+  <img src="https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/assets/languages/python.svg?v=1" width="104" height="104" alt="Python" />
+  <img src="https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/assets/languages/go.svg?v=1" width="104" height="104" alt="Go" />
+  <img src="https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/assets/languages/rust.svg?v=1" width="104" height="104" alt="Rust" />
+  <img src="https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/assets/languages/java.svg?v=1" width="104" height="104" alt="Java" />
+  <img src="https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/assets/languages/csharp.svg?v=1" width="104" height="104" alt="C#" />
+  <img src="https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/assets/languages/php.svg?v=1" width="104" height="104" alt="PHP" />
+  <img src="https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/assets/languages/ruby.svg?v=1" width="104" height="104" alt="Ruby" />
+  <img src="https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/assets/languages/c.svg?v=1" width="104" height="104" alt="C" />
+  <img src="https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/assets/languages/cpp.svg?v=1" width="104" height="104" alt="C++" />
+  <img src="https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/assets/languages/objective-c.svg?v=1" width="104" height="104" alt="Objective-C" />
+  <img src="https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/assets/languages/metal.svg?v=1" width="104" height="104" alt="Metal" />
+  <img src="https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/assets/languages/cuda.svg?v=1" width="104" height="104" alt="CUDA" />
+  <img src="https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/assets/languages/swift.svg?v=1" width="104" height="104" alt="Swift" />
+  <img src="https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/assets/languages/kotlin.svg?v=1" width="104" height="104" alt="Kotlin" />
+  <img src="https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/assets/languages/scala.svg?v=1" width="104" height="104" alt="Scala" />
+  <img src="https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/assets/languages/dart.svg?v=1" width="104" height="104" alt="Dart" />
+  <img src="https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/assets/languages/svelte.svg?v=1" width="104" height="104" alt="Svelte" />
+  <img src="https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/assets/languages/vue.svg?v=1" width="104" height="104" alt="Vue" />
+  <img src="https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/assets/languages/astro.svg?v=1" width="104" height="104" alt="Astro" />
+  <img src="https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/assets/languages/liquid.svg?v=1" width="104" height="104" alt="Liquid" />
+  <img src="https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/assets/languages/delphi.svg?v=1" width="104" height="104" alt="Pascal / Delphi" />
+  <img src="https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/assets/languages/lua.svg?v=1" width="104" height="104" alt="Lua" />
+  <img src="https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/assets/languages/r.svg?v=1" width="104" height="104" alt="R" />
+  <img src="https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/assets/languages/luau.svg?v=1" width="104" height="104" alt="Luau" />
+  <img src="https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/assets/languages/cfml.svg?v=1" width="104" height="104" alt="CFML" />
+  <img src="https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/assets/languages/cobol.svg?v=1" width="104" height="104" alt="COBOL" />
+  <img src="https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/assets/languages/vbnet.svg?v=1" width="104" height="104" alt="Visual Basic .NET" />
+  <img src="https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/assets/languages/erlang.svg?v=1" width="104" height="104" alt="Erlang" />
+  <img src="https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/assets/languages/solidity.svg?v=1" width="104" height="104" alt="Solidity" />
+  <img src="https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/assets/languages/terraform.svg?v=1" width="104" height="104" alt="Terraform / OpenTofu" />
+  <img src="https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/assets/languages/nix.svg?v=1" width="104" height="104" alt="Nix" />
 </p>
 
 <sub>Per-language details — extensions, frameworks, and what exactly gets extracted — in [Supported Languages](#supported-languages).</sub>
@@ -306,7 +353,7 @@ agent writes src/Widget.ts
 
 The handful of cases where manual `codegraph sync` makes sense: the watcher is disabled (sandboxed environments, or `CODEGRAPH_NO_DAEMON=1`), or you're scripting against the index outside an agent session and want a pre-flight sync at the start of your script.
 
-→ Full deep-dive in [Guides → Indexing a Project](https://colbymchenry.github.io/codegraph/guides/indexing/#stay-fresh-automatically).
+→ Full deep-dive in [Guides → Indexing a Project](https://github.com/bridgenext/forge-codegraph/tree/main/site/src/content/docs/guides/indexing/#stay-fresh-automatically).
 
 </details>
 
@@ -372,12 +419,12 @@ Each bridge emits edges tagged `provenance:'heuristic'` with `metadata.synthesiz
 ### 1. Run the Installer
 
 ```bash
-npx @colbymchenry/codegraph
+codegraph install
 ```
 
 The installer will:
 - Ask which agent(s) to configure — auto-detects installed ones from: **Claude Code**, **Cursor**, **Codex CLI**, **opencode**, **Hermes Agent**, **Gemini CLI**, **Antigravity IDE**, **Kiro**, **GitHub Copilot** (VS Code, Copilot CLI, JetBrains IDEs)
-- Prompt to install `codegraph` on your PATH (so agents can launch the MCP server)
+- Check that `codegraph` is on your PATH (so agents can launch the MCP server), and point you at the install one-liner if it isn't
 - Ask whether configs apply to all your projects or just this one
 - Write each chosen agent's MCP server config, plus a small marker-fenced CodeGraph section in the agent's instructions file (`CLAUDE.md` / `AGENTS.md` / `GEMINI.md`) — that's how subagents and non-MCP agents learn the `codegraph explore` command, since the MCP server's own guidance only reaches the main agent. Removed cleanly by `codegraph uninstall`.
 - Set up auto-allow permissions when Claude Code is one of the targets
@@ -423,9 +470,10 @@ That's it — your agent will use CodeGraph tools automatically when a `.codegra
 <details>
 <summary><strong>Manual Setup (Alternative)</strong></summary>
 
-**Install globally:**
+**Install the CLI:**
 ```bash
-npm install -g @colbymchenry/codegraph
+curl -fsSL https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/install.sh | sh   # macOS / Linux
+irm https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/install.ps1 | iex        # Windows
 ```
 
 **Add to `~/.claude.json`:**
@@ -578,14 +626,19 @@ Even when the server's own root has no `.codegraph/` index, the tools stay avail
 
 ## Library Usage
 
-CodeGraph can be embedded directly. The npm package re-exports its programmatic
-API, so both `import` and `require` resolve the `CodeGraph` class in your own
-process — handy for embedding it in an app (e.g. an Electron main process).
+CodeGraph can be embedded directly — both `import` and `require` resolve the
+`CodeGraph` class in your own process, handy for embedding it in an app (e.g. an
+Electron main process).
+
+> **Fork note:** depend on `@bridgenext/codegraph` (not upstream
+> `@colbymchenry/codegraph`). The published main package carries the type
+> declarations and re-exports the compiled library from the per-platform
+> bundle, so `import` and `require` both resolve without a build step.
 
 ```typescript
-import CodeGraph from '@colbymchenry/codegraph';
+import CodeGraph from '@bridgenext/codegraph';
 // CommonJS works too:
-//   const { CodeGraph } = require('@colbymchenry/codegraph');
+//   const { CodeGraph } = require('@bridgenext/codegraph');
 
 const cg = await CodeGraph.init('/path/to/project');
 // Or: const cg = await CodeGraph.open('/path/to/project');
@@ -610,9 +663,8 @@ that drive the graph directly: `DatabaseConnection`, `QueryBuilder`,
 
 **Embedding requirements**
 
-- Install from npm (`npm i @colbymchenry/codegraph`) so the matching
-  per-platform package — which carries the compiled library and its
-  dependencies — is fetched alongside the shim.
+- Build the package (`npm ci && npm run build`) so `dist/` — the compiled
+  library — exists before your app resolves it.
 - The API runs on **your** runtime, so it needs **Node 22.5+** for the built-in
   `node:sqlite` (Electron qualifies when its bundled Node is 22.5+). The CLI and
   MCP server are unaffected — they run on the self-contained bundled runtime.
@@ -716,47 +768,52 @@ Re-index (`codegraph index`) after adding or changing mappings.
 
 ## Telemetry
 
-CodeGraph collects **anonymous usage statistics** — which tools and commands get
-used, which languages get indexed — to guide where language and agent support
-work goes. **Never** any code, paths, file or symbol names, queries, or IP
-addresses; usage is aggregated locally into daily totals before anything is
-sent, and the ingest endpoint is [public code in this repo](telemetry-worker/)
-that enforces the documented field list. The installer asks up front; turn it
-off any time:
+**None.** This fork collects nothing and reports nothing.
 
-```bash
-codegraph telemetry off    # or: CODEGRAPH_TELEMETRY=0, or DO_NOT_TRACK=1
-```
+Upstream CodeGraph shipped default-on anonymous usage telemetry (a client, a
+Cloudflare ingest endpoint, and a dashboard) plus an installer prompt that
+POSTed your e-mail address to a marketing waitlist. All of it is **deleted from
+this fork** — not disabled behind a flag. There is no `codegraph telemetry`
+command here because there is nothing to configure.
 
-[`TELEMETRY.md`](TELEMETRY.md) lists every field, with the off-switches and the
-full data-handling story.
+The only outbound network request this build makes is to **github.com**, to
+resolve the latest release tag (at most once a day) and to download a release
+bundle when you run `codegraph upgrade`. Neither sends anything about you, your
+machine, or your code. Both are suppressed by `CODEGRAPH_NO_UPDATE_CHECK=1` or
+`DO_NOT_TRACK=1`.
+
+Indexing is entirely local: parsing, the SQLite graph under `.codegraph/`, and
+every MCP query stay on your machine.
+
+`__tests__/no-telemetry.test.ts` enforces this — it fails the build if any
+telemetry identifier, analytics dependency, or non-GitHub network host appears
+in the tree. Full record of what was removed and why:
+[`docs/design/no-telemetry.md`](docs/design/no-telemetry.md).
 
 ## Verified releases
 
-Every artifact is built and published by the public
+Every artifact is built and published by this repository's
 [Release workflow](.github/workflows/release.yml) — never from a laptop — and
 carries cryptographic proof of it:
 
-- **npm packages** are published via [trusted publishing](https://docs.npmjs.com/trusted-publishers)
-  (OIDC — no long-lived npm tokens exist that could be stolen) with
-  [provenance attestations](https://docs.npmjs.com/generating-provenance-statements)
-  linking every version to the exact commit and workflow run that built it.
-  Verify what's installed:
-
-  ```bash
-  npm audit signatures
-  ```
+- **Downloads are checksum-verified at install time.** `install.sh` and
+  `install.ps1` fetch the release's `SHA256SUMS` and refuse to install an
+  archive whose hash doesn't match. (Upstream downloaded and extracted without
+  checking.)
 
 - **GitHub Release bundles** (and `SHA256SUMS`) carry signed
   [build attestations](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations)
-  (SLSA v1.0 Build Level 2). Verify any downloaded bundle:
+  (SLSA v1.0 Build Level 2) — a checksum proves integrity, an attestation
+  proves origin. Verify any downloaded bundle:
 
   ```bash
-  gh attestation verify codegraph-darwin-arm64.tar.gz -R colbymchenry/codegraph
+  gh attestation verify codegraph-darwin-arm64.tar.gz -R bridgenext/forge-codegraph
   ```
 
-Releases published before July 2026 predate this pipeline and don't carry
-attestations.
+Packages are published to npm only by the release workflow, with `--provenance`,
+so every published version carries a signed link back to the workflow run and
+commit that built it. The repository's own manifest is `private`, so a stray
+`npm publish` from a checkout cannot ship under the `@bridgenext/codegraph` name.
 
 ## Supported Platforms
 
@@ -865,7 +922,7 @@ Framework routing is validated the same way, on a canonical app per framework: E
 
 **MCP hits `database is locked`** — current builds shouldn't: CodeGraph bundles its own Node runtime and uses Node's built-in `node:sqlite` in WAL mode, where concurrent reads never block on a writer. If you still see it:
 
-- **You're on an old (pre-0.9) install.** Reinstall to get the bundled runtime — `curl -fsSL https://raw.githubusercontent.com/colbymchenry/codegraph/main/install.sh | sh` (macOS/Linux), `irm https://raw.githubusercontent.com/colbymchenry/codegraph/main/install.ps1 | iex` (Windows), or `npm i -g @colbymchenry/codegraph@latest`.
+- **You're on an old (pre-0.9) install.** Reinstall to get the bundled runtime — `curl -fsSL https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/install.sh | sh` (macOS/Linux) or `irm https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/install.ps1 | iex` (Windows).
 - **`codegraph status` shows `Journal:` other than `wal`** — WAL couldn't be enabled on this filesystem (common on network shares and WSL2 `/mnt`), so reads can block on writes. Move the project (with its `.codegraph/` folder) onto a local disk.
 
 **MCP server not connecting** — Your agent starts the server itself, so you don't launch it by hand. Make sure the project is initialized and indexed (`codegraph status`) and that the path in your MCP config is correct. If it still won't connect, re-run `codegraph install` to rewrite the config.
@@ -880,7 +937,7 @@ Framework routing is validated the same way, on a canonical app per framework: E
 
 ## License
 
-MIT
+MIT — same as upstream [CodeGraph](https://github.com/colbymchenry/codegraph), from which this fork derives. See [LICENSE](LICENSE).
 
 ---
 
@@ -888,6 +945,6 @@ MIT
 
 **Made for AI coding agents — Claude Code, Cursor, Codex CLI, opencode, Hermes Agent, Gemini CLI, Antigravity IDE, Kiro, and GitHub Copilot**
 
-[Report Bug](https://github.com/colbymchenry/codegraph/issues) · [Request Feature](https://github.com/colbymchenry/codegraph/issues)
+[Report an issue](https://github.com/bridgenext/forge-codegraph/issues) · [Upstream project](https://github.com/colbymchenry/codegraph)
 
 </div>

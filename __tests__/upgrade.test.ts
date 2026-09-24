@@ -67,7 +67,7 @@ describe('detectInstallMethod', () => {
   });
 
   it('detects a global npm install', () => {
-    const filename = '/usr/local/lib/node_modules/@colbymchenry/codegraph/dist/bin/codegraph.js';
+    const filename = '/usr/local/lib/node_modules/@bridgenext/codegraph/dist/bin/codegraph.js';
     const m = detectInstallMethod({
       filename,
       platform: 'linux',
@@ -79,13 +79,13 @@ describe('detectInstallMethod', () => {
 
   it('detects a local (project) npm install as local', () => {
     const cwd = '/home/u/project';
-    const filename = `${cwd}/node_modules/@colbymchenry/codegraph/dist/bin/codegraph.js`;
+    const filename = `${cwd}/node_modules/@bridgenext/codegraph/dist/bin/codegraph.js`;
     const m = detectInstallMethod({ filename, platform: 'linux', cwd, exists: () => false });
     expect(m).toEqual({ kind: 'npm', scope: 'local' });
   });
 
   it('detects an npx run from the _npx cache', () => {
-    const filename = '/home/u/.npm/_npx/abc123/node_modules/@colbymchenry/codegraph/dist/bin/codegraph.js';
+    const filename = '/home/u/.npm/_npx/abc123/node_modules/@bridgenext/codegraph/dist/bin/codegraph.js';
     const m = detectInstallMethod({ filename, platform: 'linux', cwd: '/home/u', exists: () => false });
     expect(m).toEqual({ kind: 'npx' });
   });
@@ -96,7 +96,7 @@ describe('detectInstallMethod', () => {
   // install.sh into ~/.codegraph — a second install that loses the PATH race
   // to npm's shim, so `codegraph -v` stays on the old version forever.
   it('detects the npm thin-installer platform package as npm, not bundle', () => {
-    const root = '/usr/local/lib/node_modules/@colbymchenry/codegraph/node_modules/@colbymchenry/codegraph-linux-x64';
+    const root = '/usr/local/lib/node_modules/@bridgenext/codegraph/node_modules/@bridgenext/codegraph-linux-x64';
     const filename = `${root}/lib/dist/bin/codegraph.js`;
     const present = new Set([`${root}/node`, `${root}/bin/codegraph`]);
     const m = detectInstallMethod({
@@ -110,7 +110,7 @@ describe('detectInstallMethod', () => {
 
   it('detects a project-local thin-installer platform package as npm local', () => {
     const cwd = '/home/u/project';
-    const root = `${cwd}/node_modules/@colbymchenry/codegraph/node_modules/@colbymchenry/codegraph-darwin-arm64`;
+    const root = `${cwd}/node_modules/@bridgenext/codegraph/node_modules/@bridgenext/codegraph-darwin-arm64`;
     const filename = `${root}/lib/dist/bin/codegraph.js`;
     const present = new Set([`${root}/node`, `${root}/bin/codegraph`]);
     const m = detectInstallMethod({ filename, platform: 'darwin', cwd, exists: bundleExists(present) });
@@ -118,7 +118,7 @@ describe('detectInstallMethod', () => {
   });
 
   it('still detects an npx run when the cached platform package has the bundle layout', () => {
-    const root = '/home/u/.npm/_npx/abc123/node_modules/@colbymchenry/codegraph/node_modules/@colbymchenry/codegraph-linux-x64';
+    const root = '/home/u/.npm/_npx/abc123/node_modules/@bridgenext/codegraph/node_modules/@bridgenext/codegraph-linux-x64';
     const filename = `${root}/lib/dist/bin/codegraph.js`;
     const present = new Set([`${root}/node`, `${root}/bin/codegraph`]);
     const m = detectInstallMethod({ filename, platform: 'linux', cwd: '/home/u', exists: bundleExists(present) });
@@ -407,69 +407,6 @@ describe('runUpgrade', () => {
     expect(code).toBe(0);
     expect(calls.runs).toHaveLength(0);
     expect(calls.logs.join('\n')).toMatch(/git pull/);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Beta signup offer — fires ONLY after a real, successful binary update.
-// (The hook itself gates on TTY + the once-per-machine stored choice; see
-// __tests__/beta-signup.test.ts. Here we pin WHEN the upgrade path invokes it.)
-// ---------------------------------------------------------------------------
-
-describe('runUpgrade beta signup offer', () => {
-  function withSpy(deps: UpgradeDeps): { deps: UpgradeDeps; offered: () => number } {
-    let n = 0;
-    deps.offerBetaSignup = async () => { n += 1; };
-    return { deps, offered: () => n };
-  }
-
-  it('offers after a successful npm upgrade', async () => {
-    const { deps } = makeDeps({ method: { kind: 'npm', scope: 'global' }, currentVersion: '0.9.8' });
-    const { offered } = withSpy(deps);
-    expect(await runUpgrade({}, deps)).toBe(0);
-    expect(offered()).toBe(1);
-  });
-
-  it('does not offer on --check', async () => {
-    const { deps } = makeDeps({ method: { kind: 'npm', scope: 'global' }, currentVersion: '0.9.8' });
-    const { offered } = withSpy(deps);
-    expect(await runUpgrade({ check: true }, deps)).toBe(0);
-    expect(offered()).toBe(0);
-  });
-
-  it('does not offer when already up to date', async () => {
-    const { deps } = makeDeps({ method: { kind: 'npm', scope: 'global' }, currentVersion: '0.9.9' });
-    const { offered } = withSpy(deps);
-    expect(await runUpgrade({}, deps)).toBe(0);
-    expect(offered()).toBe(0);
-  });
-
-  it('does not offer when the upgrade fails', async () => {
-    const { deps } = makeDeps(
-      { method: { kind: 'npm', scope: 'global' }, currentVersion: '0.9.8' },
-      1 // npm exits non-zero
-    );
-    const { offered } = withSpy(deps);
-    expect(await runUpgrade({}, deps)).toBe(1);
-    expect(offered()).toBe(0);
-  });
-
-  it('does not offer on npx / source no-op paths', async () => {
-    for (const method of [
-      { kind: 'npx' } as const,
-      { kind: 'source', root: '/dev/codegraph' } as const,
-    ]) {
-      const { deps } = makeDeps({ method, currentVersion: '0.9.8' });
-      const { offered } = withSpy(deps);
-      expect(await runUpgrade({}, deps)).toBe(0);
-      expect(offered()).toBe(0);
-    }
-  });
-
-  it('a throwing offer never fails the upgrade', async () => {
-    const { deps } = makeDeps({ method: { kind: 'npm', scope: 'global' }, currentVersion: '0.9.8' });
-    deps.offerBetaSignup = async () => { throw new Error('boom'); };
-    expect(await runUpgrade({}, deps)).toBe(0);
   });
 });
 

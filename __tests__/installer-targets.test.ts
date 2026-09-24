@@ -1169,6 +1169,11 @@ describe('Installer targets — partial-state idempotency', () => {
     expect(fs.readFileSync(file, 'utf-8')).toBe(firstPass);
   });
 
+  // The upstream package name is DELIBERATE here and in the prompt-hook case
+  // below: these fixtures reproduce hooks that a pre-fork `@colbymchenry`
+  // install left in a user's settings.json. A teammate migrating from upstream
+  // to the Bridgenext fork must still have those stale hooks cleaned up, so the
+  // matcher has to keep recognizing that spelling.
   it('claude: uninstall strips stale hooks written in the npx form (local)', () => {
     const claude = getTarget('claude')!;
     const file = seedSettings('local', {

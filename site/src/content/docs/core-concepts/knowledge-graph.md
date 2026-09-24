@@ -24,4 +24,4 @@ Most edges come straight from the AST. A few — at dynamic-dispatch boundaries 
 - **Impact** computes the transitive radius affected by a change.
 - **Explore** returns source for several related symbols grouped by file, plus the call path among them, in one call.
 
-See the [CLI](/codegraph/reference/cli/) and [MCP Server](/codegraph/reference/mcp-server/) references for how to run these.
+See the [CLI](/forge-codegraph/reference/cli/) and [MCP Server](/forge-codegraph/reference/mcp-server/) references for how to run these.

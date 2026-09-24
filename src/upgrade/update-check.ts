@@ -9,7 +9,11 @@
  * as a one-line notice (stderr log, MCP initialize instructions, and
  * `codegraph_status`) telling the user to run `codegraph upgrade`.
  *
- * Invariants (mirrors the telemetry module's contract):
+ * This is NOT telemetry: the request is a plain GET for a release tag and
+ * carries nothing about the user, the machine, or the indexed code. This fork
+ * has no telemetry of any kind (see docs/design/no-telemetry.md).
+ *
+ * Invariants:
  *   - Never stdout — stdio is the MCP protocol channel.
  *   - Never blocking: the network refresh is fire-and-forget; every reader
  *     (`getUpdateNotice`) is a cheap synchronous cache read, so the #172
@@ -23,9 +27,9 @@
  * The check itself reuses `resolveLatestVersion` — the GitHub release-redirect
  * trick with the API fallback — so version resolution can't drift from what
  * `codegraph upgrade` installs. Results are cached in `~/.codegraph/` (the
- * same global state dir telemetry and the daemon registry use) with a 24h TTL
- * on success and a 1h backoff after failure, shared across every proxy /
- * daemon process on the machine.
+ * same global state dir the daemon registry uses) with a 24h TTL on success
+ * and a 1h backoff after failure, shared across every proxy / daemon process
+ * on the machine.
  */
 
 import * as fs from 'fs';
@@ -84,7 +88,7 @@ function envTruthy(raw: string | undefined): boolean {
 
 /**
  * True when the update check must not run at all — no network call, no
- * notice. `DO_NOT_TRACK` uses the same truthiness the telemetry opt-out does.
+ * notice. `DO_NOT_TRACK` is the cross-tool don't-phone-home convention.
  */
 export function updateCheckDisabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return envTruthy(env.CODEGRAPH_NO_UPDATE_CHECK) || envTruthy(env.DO_NOT_TRACK);

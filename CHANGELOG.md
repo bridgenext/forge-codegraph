@@ -1,8 +1,12 @@
 # Changelog
 
 All notable changes to CodeGraph are documented here. Each entry also ships as
-a [GitHub Release](https://github.com/colbymchenry/codegraph/releases) tagged
-`vX.Y.Z`, which is where most people will look.
+a [GitHub Release](https://github.com/bridgenext/forge-codegraph/releases)
+tagged `vX.Y.Z`, which is where most people will look.
+
+Entries at and below `[1.6.0]` are upstream
+[CodeGraph](https://github.com/colbymchenry/codegraph) history, kept verbatim.
+Bridgenext fork changes start under `[Unreleased]`.
 
 Each release opens with a short **Highlights** list — the handful of things most
 users will notice — followed by the full notes.
@@ -12,6 +16,38 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+First release of the **Bridgenext fork**. Same code intelligence as upstream
+CodeGraph 1.6.0 — no telemetry, and installs come from Bridgenext's own
+repository.
+
+### Highlights
+
+- **Telemetry is gone.** Upstream collected anonymous usage stats by default and sent them to an external endpoint. This build collects nothing and sends nothing — the code was removed, not switched off, and a test keeps it that way.
+- **No more e-mail prompt.** The installer no longer offers a marketing waitlist or sends your address anywhere.
+- **Install from Bridgenext.** The package is `@bridgenext/codegraph`, published under Bridgenext's own scope, and `install.sh` / `install.ps1` and `codegraph upgrade` use Bridgenext's own repository and releases.
+- **Downloads are verified.** The installer checks every downloaded build against the release checksum and refuses to install if it doesn't match.
+- **Your agent config keeps its file permissions.** Installing no longer makes a locked-down `~/.claude.json` readable by other users on the machine.
+- **Automated checks on every change.** Type check, build, full test suite, and a dependency security audit now run on every push and pull request.
+- Upgrading from an upstream install? Remove it first (`npm rm -g @colbymchenry/codegraph`), then run the install command in the README.
+
+### Breaking Changes
+
+- The `codegraph telemetry` command is removed — there is no telemetry to configure. `CODEGRAPH_TELEMETRY` is likewise ignored. `DO_NOT_TRACK=1` still works and now only affects the update check.
+- This fork publishes under a different name. `npm i -g @colbymchenry/codegraph` installs upstream, not this build — install `@bridgenext/codegraph` instead, and depend on that name when embedding CodeGraph as a library.
+
+### Security
+
+- Release archives downloaded by `install.sh` and `install.ps1` are now verified against the release's `SHA256SUMS` and the install **aborts on a mismatch**. Previously the archive was extracted and put on your PATH without any integrity check.
+- Writing an agent config file (for example `~/.claude.json`, which holds MCP server definitions and any API keys in their `env` blocks) now preserves the file's original permissions. Previously the rewrite reset them to the process default, silently turning a `600` file into a world-readable `644`.
+- Agent config files are written through a private, randomly-named temporary file that is never readable by other users and cannot be redirected by a pre-planted symlink.
+- Updated `picomatch` to clear two high-severity advisories in a shipped dependency (ReDoS, and incorrect glob matching via POSIX character classes).
+- The installer no longer runs `npm install -g` against a public registry mid-install.
+- `codegraph upgrade` on Windows now checks the build it downloads against the release checksum before installing it, and stops if they disagree. Previously only a fresh install was verified; an upgrade was not.
+- The repository's own package manifest is marked private, so a stray `npm publish` from a checkout cannot ship the wrong contents under the `@bridgenext/codegraph` name. Releases are assembled and published only by the release workflow.
+
+### Fixes
+
+- The docs site links and base path now match this repository.
 
 ## [1.6.0] - 2026-08-26
 

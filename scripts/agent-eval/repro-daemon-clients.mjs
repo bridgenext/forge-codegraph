@@ -38,7 +38,7 @@ const QUERIES = [
 
 function makeClient(id) {
   const child = spawn('node', [CLI, 'serve', '--mcp', '--path', repo], {
-    env: { ...process.env, CODEGRAPH_TELEMETRY: '0', DO_NOT_TRACK: '1', CODEGRAPH_MCP_LOG_ATTACH: '0' },
+    env: { ...process.env, DO_NOT_TRACK: '1', CODEGRAPH_MCP_LOG_ATTACH: '0' },
     stdio: ['pipe', 'pipe', 'inherit'],
   });
   let buf = '';
