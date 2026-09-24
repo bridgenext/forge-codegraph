@@ -54,11 +54,9 @@ function resolveLibrary() {
     'codegraph: the programmatic API is unavailable because the platform bundle\n' +
     '(' + pkg + ') is not installed.\n' +
     'The compiled library ships inside that per-platform optional dependency.\n' +
-    'Fixes:\n' +
-    '  - install from the official npm registry so the matching bundle is fetched:\n' +
-    '      npm i @bridgenext/codegraph --registry=https://registry.npmjs.org\n' +
-    '  - or run the CLI once (e.g. `npx @bridgenext/codegraph status`) to\n' +
-    '    self-heal the bundle into ~/.codegraph, then require() will find it.'
+    'This fork is not published to any npm registry. Install the CLI with the\n' +
+    'standalone installer, then require() will find the bundle in ~/.codegraph:\n' +
+    '      curl -fsSL https://raw.githubusercontent.com/bridgenext/forge-codegraph/main/install.sh | sh'
   );
 }
 

@@ -42,6 +42,8 @@ repository.
 - Agent config files are written through a private, randomly-named temporary file that is never readable by other users and cannot be redirected by a pre-planted symlink.
 - Updated `picomatch` to clear two high-severity advisories in a shipped dependency (ReDoS, and incorrect glob matching via POSIX character classes).
 - The installer no longer runs `npm install -g` against a public registry mid-install.
+- `codegraph upgrade` on Windows now checks the build it downloads against the release checksum before installing it, and stops if they disagree. Previously only a fresh install was verified; an upgrade was not.
+- CodeGraph can no longer be installed or upgraded from a public package registry. Upgrading a copy that came from one is refused with a pointer to the verified installer, and the package is marked private so it cannot be published by accident.
 
 ### Fixes
 

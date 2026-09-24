@@ -268,11 +268,8 @@ function fail(reason) {
     'codegraph: no prebuilt bundle for ' + target + '.\n' +
     (reason ? 'codegraph: ' + reason + '\n' : '') +
     'Expected the optional package ' + pkg + ' to be installed.\n' +
-    'A registry mirror (e.g. npmmirror/cnpm) that did not mirror the per-platform\n' +
-    'package is the usual cause. Fixes:\n' +
-    '  - install from the official registry:\n' +
-    '      npm i -g @bridgenext/codegraph --registry=https://registry.npmjs.org\n' +
-    '  - or use the standalone installer (no Node required):\n' +
+    'This fork is not published to any npm registry -- use the standalone\n' +
+    'installer (no Node required), which verifies what it downloads:\n' +
     '      curl -fsSL https://raw.githubusercontent.com/' + REPO + '/main/install.sh | sh\n'
   );
   process.exit(1);

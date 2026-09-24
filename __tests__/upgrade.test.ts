@@ -347,47 +347,54 @@ describe('runUpgrade', () => {
     expect(calls.errors.join('\n')).toMatch(/exited with code/i);
   });
 
-  it('npm global: shells out to npm install -g @pkg@latest', async () => {
+  // This fork is not published to npm, so an npm-resolved copy cannot be
+  // upgraded in place — and shelling out to `npm install -g` against an
+  // unclaimed scope would be a dependency-confusion vector. The upgrade
+  // refuses and points at the checksum-verifying installer instead.
+  it('npm global: refuses to shell out to npm and points at the installer', async () => {
     const { deps, calls } = makeDeps({
       method: { kind: 'npm', scope: 'global' },
       currentVersion: '0.9.8',
     });
     const code = await runUpgrade({}, deps);
-    expect(code).toBe(0);
-    expect(calls.runs[0].cmd).toBe('npm');
-    expect(calls.runs[0].args).toEqual(['install', '-g', `${NPM_PACKAGE}@latest`]);
+    expect(code).toBe(1);
+    expect(calls.runs).toHaveLength(0);
+    expect(calls.runs.some((r) => JSON.stringify(r).includes('npm'))).toBe(false);
+    expect(calls.logs.join('\n')).toContain('install.sh');
+    expect(calls.logs.join('\n')).toContain(`uninstall -g ${NPM_PACKAGE}`);
   });
 
-  it('npm on win32 routes through cmd.exe (a direct npm.cmd spawn EINVALs on modern Node)', async () => {
+  it('npm on win32 points at the PowerShell installer', async () => {
     const { deps, calls } = makeDeps({
       method: { kind: 'npm', scope: 'global' },
       currentVersion: '0.9.8',
       platform: 'win32',
     });
-    await runUpgrade({}, deps);
-    expect(calls.runs[0].cmd).toBe('cmd.exe');
-    expect(calls.runs[0].args.slice(0, 3)).toEqual(['/d', '/s', '/c']);
-    expect(calls.runs[0].args[3]).toBe(`npm install -g ${NPM_PACKAGE}@latest`);
-  });
-
-  it('npm: a pinned version is passed through as @<version>', async () => {
-    const { deps, calls } = makeDeps({
-      method: { kind: 'npm', scope: 'global' },
-      currentVersion: '0.9.9',
-    });
-    await runUpgrade({ version: '0.9.8' }, deps);
-    // npm spec carries no leading "v".
-    expect(calls.runs[0].args).toEqual(['install', '-g', `${NPM_PACKAGE}@0.9.8`]);
-  });
-
-  it('npm: surfaces a non-zero exit as failure', async () => {
-    const { deps, calls } = makeDeps(
-      { method: { kind: 'npm', scope: 'global' }, currentVersion: '0.9.8' },
-      1
-    );
     const code = await runUpgrade({}, deps);
     expect(code).toBe(1);
-    expect(calls.errors.join('\n')).toMatch(/npm exited/i);
+    expect(calls.runs).toHaveLength(0);
+    expect(calls.logs.join('\n')).toContain('install.ps1');
+  });
+
+  it('npm local: names the non-global uninstall command', async () => {
+    const { deps, calls } = makeDeps({
+      method: { kind: 'npm', scope: 'local' },
+      currentVersion: '0.9.9',
+    });
+    const code = await runUpgrade({ version: '0.9.8' }, deps);
+    expect(code).toBe(1);
+    expect(calls.runs).toHaveLength(0);
+    expect(calls.logs.join('\n')).toContain(`npm uninstall ${NPM_PACKAGE}`);
+  });
+
+  it('npm: explains that the fork is not on a registry', async () => {
+    const { deps, calls } = makeDeps({
+      method: { kind: 'npm', scope: 'global' },
+      currentVersion: '0.9.8',
+    });
+    const code = await runUpgrade({}, deps);
+    expect(code).toBe(1);
+    expect(calls.errors.join('\n')).toMatch(/not published to any npm registry/i);
   });
 
   it('npx: nothing to upgrade', async () => {
@@ -415,11 +422,11 @@ describe('runUpgrade', () => {
 // ---------------------------------------------------------------------------
 
 describe('post-upgrade refresh of installed agent surfaces', () => {
-  it('runs `codegraph install --refresh` via the NEW binary after a successful npm upgrade', async () => {
+  it('runs `codegraph install --refresh` via the NEW binary after a successful bundle upgrade', async () => {
     const { deps, calls } = makeDeps({
-      method: { kind: 'npm', scope: 'global' },
+      method: { kind: 'bundle', os: 'unix', bundleRoot: '/h/.codegraph/versions/v0.9.8', installDir: '/h/.codegraph' },
       currentVersion: '0.9.8',
-      hasCommand: (cmd) => cmd === 'codegraph',
+      hasCommand: (cmd) => cmd === 'codegraph' || cmd === 'curl',
     });
     const code = await runUpgrade({}, deps);
     expect(code).toBe(0);
@@ -432,10 +439,10 @@ describe('post-upgrade refresh of installed agent surfaces', () => {
 
   it('runs the Windows .cmd launcher through cmd.exe', async () => {
     const { deps, calls } = makeDeps({
-      method: { kind: 'npm', scope: 'global' },
+      method: { kind: 'bundle', os: 'windows', bundleRoot: 'C:/x/codegraph/current', installDir: 'C:/x/codegraph' },
       currentVersion: '0.9.8',
       platform: 'win32',
-      hasCommand: (cmd) => cmd === 'codegraph',
+      hasCommand: (cmd) => cmd === 'codegraph' || cmd === 'curl',
     });
     const code = await runUpgrade({}, deps);
     expect(code).toBe(0);
@@ -446,7 +453,7 @@ describe('post-upgrade refresh of installed agent surfaces', () => {
 
   it('skips the refresh when `codegraph` is not resolvable on PATH', async () => {
     const { deps, calls } = makeDeps({
-      method: { kind: 'npm', scope: 'global' },
+      method: { kind: 'bundle', os: 'unix', bundleRoot: '/h/.codegraph/versions/v0.9.8', installDir: '/h/.codegraph' },
       currentVersion: '0.9.8',
       // default hasCommand resolves only curl
     });
@@ -457,9 +464,9 @@ describe('post-upgrade refresh of installed agent surfaces', () => {
 
   it('a failing refresh warns but does not fail the upgrade', async () => {
     const { deps, calls } = makeDeps({
-      method: { kind: 'npm', scope: 'global' },
+      method: { kind: 'bundle', os: 'unix', bundleRoot: '/h/.codegraph/versions/v0.9.8', installDir: '/h/.codegraph' },
       currentVersion: '0.9.8',
-      hasCommand: (cmd) => cmd === 'codegraph',
+      hasCommand: (cmd) => cmd === 'codegraph' || cmd === 'curl',
     });
     deps.run = (cmd, args, env) => {
       calls.runs.push({ cmd, args, env });
@@ -473,9 +480,9 @@ describe('post-upgrade refresh of installed agent surfaces', () => {
   it('does not run after a failed upgrade', async () => {
     const { deps, calls } = makeDeps(
       {
-        method: { kind: 'npm', scope: 'global' },
+        method: { kind: 'bundle', os: 'unix', bundleRoot: '/h/.codegraph/versions/v0.9.8', installDir: '/h/.codegraph' },
         currentVersion: '0.9.8',
-        hasCommand: (cmd) => cmd === 'codegraph',
+        hasCommand: (cmd) => cmd === 'codegraph' || cmd === 'curl',
       },
       1
     );
@@ -488,9 +495,9 @@ describe('post-upgrade refresh of installed agent surfaces', () => {
     process.env.CODEGRAPH_NO_INSTALL_REFRESH = '1';
     try {
       const { deps, calls } = makeDeps({
-        method: { kind: 'npm', scope: 'global' },
+        method: { kind: 'bundle', os: 'unix', bundleRoot: '/h/.codegraph/versions/v0.9.8', installDir: '/h/.codegraph' },
         currentVersion: '0.9.8',
-        hasCommand: (cmd) => cmd === 'codegraph',
+        hasCommand: (cmd) => cmd === 'codegraph' || cmd === 'curl',
       });
       const code = await runUpgrade({}, deps);
       expect(code).toBe(0);
@@ -502,9 +509,9 @@ describe('post-upgrade refresh of installed agent surfaces', () => {
 
   it('skips the refresh when the version probe says a stale install shadows the new one', async () => {
     const { deps, calls } = makeDeps({
-      method: { kind: 'npm', scope: 'global' },
+      method: { kind: 'bundle', os: 'unix', bundleRoot: '/h/.codegraph/versions/v0.9.8', installDir: '/h/.codegraph' },
       currentVersion: '0.9.8',
-      hasCommand: (cmd) => cmd === 'codegraph',
+      hasCommand: (cmd) => cmd === 'codegraph' || cmd === 'curl',
       capture: () => ({ code: 0, stdout: '0.9.8\n' }), // PATH still serves the OLD version
     });
     const code = await runUpgrade({}, deps);
@@ -522,12 +529,15 @@ describe('post-upgrade refresh of installed agent surfaces', () => {
 // ---------------------------------------------------------------------------
 
 describe('post-upgrade version probe', () => {
-  const npmGlobal = { method: { kind: 'npm', scope: 'global' } as InstallMethod, currentVersion: '0.9.8' };
+  const bundleUnix = {
+    method: { kind: 'bundle', os: 'unix', bundleRoot: '/h/.codegraph/versions/v0.9.8', installDir: '/h/.codegraph' } as InstallMethod,
+    currentVersion: '0.9.8',
+  };
 
   it('match: confirms the same terminal already serves the new version', async () => {
     const { deps, calls } = makeDeps({
-      ...npmGlobal,
-      hasCommand: (c) => c === 'codegraph',
+      ...bundleUnix,
+      hasCommand: (c) => c === 'codegraph' || c === 'curl',
       capture: () => ({ code: 0, stdout: '0.9.9\n' }),
     });
     const code = await runUpgrade({}, deps);
@@ -540,8 +550,8 @@ describe('post-upgrade version probe', () => {
 
   it('mismatch: warns that a shadowing install is still serving the old version', async () => {
     const { deps, calls } = makeDeps({
-      ...npmGlobal,
-      hasCommand: (c) => c === 'codegraph',
+      ...bundleUnix,
+      hasCommand: (c) => c === 'codegraph' || c === 'curl',
       capture: () => ({ code: 0, stdout: '0.9.8\n' }),
     });
     const code = await runUpgrade({}, deps);
@@ -553,7 +563,7 @@ describe('post-upgrade version probe', () => {
   });
 
   it('inconclusive: falls back to the soft new-terminal hint when codegraph is not on PATH', async () => {
-    const { deps, calls } = makeDeps(npmGlobal); // hasCommand resolves only curl
+    const { deps, calls } = makeDeps(bundleUnix); // hasCommand resolves only curl
     const code = await runUpgrade({}, deps);
     expect(code).toBe(0);
     expect(calls.captures).toHaveLength(0);
@@ -562,8 +572,8 @@ describe('post-upgrade version probe', () => {
 
   it('inconclusive: a failing or unparsable probe never warns about shadowing', async () => {
     const { deps, calls } = makeDeps({
-      ...npmGlobal,
-      hasCommand: (c) => c === 'codegraph',
+      ...bundleUnix,
+      hasCommand: (c) => c === 'codegraph' || c === 'curl',
       capture: () => ({ code: 0, stdout: 'something went wrong\n' }),
     });
     const code = await runUpgrade({}, deps);
@@ -575,8 +585,8 @@ describe('post-upgrade version probe', () => {
 
   it('parses the last non-empty line, so a runtime warning above the version is harmless', () => {
     const { deps } = makeDeps({
-      ...npmGlobal,
-      hasCommand: (c) => c === 'codegraph',
+      ...bundleUnix,
+      hasCommand: (c) => c === 'codegraph' || c === 'curl',
       capture: () => ({ code: 0, stdout: '(node:1) ExperimentalWarning: blah\nv0.9.9\n\n' }),
     });
     expect(verifyResolvedVersion('v0.9.9', deps)).toBe('match');
@@ -584,9 +594,10 @@ describe('post-upgrade version probe', () => {
 
   it('routes the probe through cmd.exe on Windows (.cmd launcher)', async () => {
     const { deps, calls } = makeDeps({
-      ...npmGlobal,
+      ...bundleUnix,
+      method: { kind: 'bundle', os: 'windows', bundleRoot: 'C:/x/codegraph/current', installDir: 'C:/x/codegraph' },
       platform: 'win32',
-      hasCommand: (c) => c === 'codegraph' || c === 'npm.cmd',
+      hasCommand: (c) => c === 'codegraph' || c === 'curl',
       capture: () => ({ code: 0, stdout: '0.9.9\r\n' }),
     });
     const code = await runUpgrade({}, deps);
@@ -595,22 +606,24 @@ describe('post-upgrade version probe', () => {
     expect(calls.logs.join('\n')).toMatch(/now reports v0\.9\.9/);
   });
 
-  it('skips the probe for npm-local installs — PATH serves a different copy', async () => {
+  // An npm-resolved copy is refused outright (this fork ships no npm package),
+  // so the upgrade never reaches the probe.
+  it('skips the probe for npm installs — the upgrade is refused before it runs', async () => {
     const { deps, calls } = makeDeps({
       method: { kind: 'npm', scope: 'local' },
       currentVersion: '0.9.8',
-      hasCommand: (c) => c === 'codegraph',
+      hasCommand: (c) => c === 'codegraph' || c === 'curl',
       capture: () => ({ code: 0, stdout: '0.9.7\n' }),
     });
     const code = await runUpgrade({}, deps);
-    expect(code).toBe(0);
+    expect(code).toBe(1);
     expect(calls.captures).toHaveLength(0);
     expect(calls.logs.join('\n')).not.toMatch(/shadowing/);
   });
 
   it('does not probe after a failed upgrade', async () => {
     const { deps, calls } = makeDeps(
-      { ...npmGlobal, hasCommand: (c) => c === 'codegraph', capture: () => ({ code: 0, stdout: '0.9.9\n' }) },
+      { ...bundleUnix, hasCommand: (c) => c === 'codegraph' || c === 'curl', capture: () => ({ code: 0, stdout: '0.9.9\n' }) },
       1
     );
     const code = await runUpgrade({}, deps);

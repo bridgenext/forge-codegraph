@@ -576,6 +576,15 @@ export function buildWindowsUpgradeScript(bundleRoot: string, version: string, a
     `New-Item -ItemType Directory -Force -Path $tmp | Out-Null`,
     `$zip=Join-Path $tmp 'cg.zip'`,
     `Invoke-WebRequest -Uri $url -OutFile $zip`,
+    // Verify the archive against the release's SHA256SUMS BEFORE extracting it
+    // over the live install. Mirrors install.ps1's policy exactly: a mismatch
+    // is fatal, an absent/unlisted SHA256SUMS degrades to a warning, and
+    // CODEGRAPH_SKIP_CHECKSUM=1 bypasses. Until this existed, `codegraph
+    // upgrade` on Windows was the one download path with no integrity check --
+    // install.ps1 verified the bundle it fetched, this path did not.
+    `$asset='codegraph-${target}.zip'`,
+    `$sumsUrl='https://github.com/${REPO}/releases/download/${version}/SHA256SUMS'`,
+    `if($env:CODEGRAPH_SKIP_CHECKSUM -eq '1'){Write-Warning "Archive verification skipped (CODEGRAPH_SKIP_CHECKSUM=1)."}else{$sums=$null;try{$sums=(Invoke-WebRequest -Uri $sumsUrl -UseBasicParsing).Content}catch{$sums=$null};if(-not $sums){Write-Host "Note: no SHA256SUMS published for ${version}; skipping verification."}else{$expected=$null;foreach($line in ($sums -split "\`n")){$p=$line.Trim().Split([char[]]@(' ',"\`t"),[StringSplitOptions]::RemoveEmptyEntries);if($p.Length -ge 2 -and $p[0].Length -eq 64 -and [System.IO.Path]::GetFileName($p[1].TrimStart('*')) -eq $asset){$expected=$p[0].ToLower();break}};if(-not $expected){Write-Host "Note: $asset is not listed in SHA256SUMS; skipping verification."}else{$actual=(Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash.ToLower();if($actual -ne $expected){Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue;throw "codegraph: CHECKSUM MISMATCH for $asset (expected $($expected.Substring(0,12))..., got $($actual.Substring(0,12))...). Refusing to upgrade."};Write-Host "Verified SHA-256 checksum."}}}`,
     `$stage=Join-Path $tmp 'stage'`,
     `Expand-Archive -Path $zip -DestinationPath $stage -Force`,
     `$inner=Join-Path $stage 'codegraph-${target}'`,
@@ -631,27 +640,30 @@ export function npmInvocation(platform: NodeJS.Platform, npmArgs: string[]): { c
 
 function upgradeNpm(
   method: Extract<InstallMethod, { kind: 'npm' }>,
-  versionSpec: string,
+  _versionSpec: string,
   deps: UpgradeDeps
 ): number {
-  const args = method.scope === 'global'
-    ? ['install', '-g', `${NPM_PACKAGE}@${versionSpec}`]
-    : ['install', `${NPM_PACKAGE}@${versionSpec}`];
-  deps.log(c.dim(`Running: npm ${args.join(' ')}`));
-  const inv = npmInvocation(deps.platform, args);
-  const code = deps.run(inv.cmd, inv.args, process.env);
-  if (code !== 0) {
-    deps.error(`npm exited with code ${code}.`);
-    if (method.scope === 'global') {
-      deps.log(c.dim('If this is a permissions error (EACCES), your global prefix needs sudo, or use a'));
-      deps.log(c.dim('Node version manager (nvm/fnm) so global installs don’t require root.'));
-    }
-    return 1;
-  }
+  // This fork publishes nothing to npm (see BUNDLING.md), so
+  // `npm install -g @bridgenext/codegraph` cannot resolve to a Bridgenext
+  // build. Running it anyway would fetch whatever happens to occupy that name
+  // on the public registry — an unclaimed scope is a dependency-confusion
+  // vector, and an auto-upgrade is the worst place to hit one. Refuse, and
+  // point at the installer that verifies what it downloads.
+  deps.error('This copy was resolved from node_modules, but the Bridgenext fork is not published to any npm registry.');
   deps.log('');
-  deps.log(c.green('✓ Upgrade complete.'));
-  deps.log(reindexAdvisory());
-  return 0;
+  deps.log('Reinstall with the verified installer instead:');
+  deps.log(
+    c.dim(
+      deps.platform === 'win32'
+        ? `  irm ${INSTALL_PS1_URL} | iex`
+        : `  curl -fsSL ${INSTALL_SH_URL} | sh`
+    )
+  );
+  deps.log('');
+  deps.log(
+    c.dim(`Then remove the npm copy: npm ${method.scope === 'global' ? 'uninstall -g' : 'uninstall'} ${NPM_PACKAGE}`)
+  );
+  return 1;
 }
 
 // ---------------------------------------------------------------------------
